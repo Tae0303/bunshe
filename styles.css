@@ -520,5 +520,34 @@ main { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
 #view-add .date-row input,
 #view-add #note,
 #view-add .ghost-btn { height: 44px; }
-#save { height: 50px; margin-bottom: 8px; }
-#formError { margin: 0 0 8px; }
+/* Save expense floats just above the tab bar (it is inside the Add screen, so it hides with it). */
+#save {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(54px + 10px + env(safe-area-inset-bottom));
+  z-index: 9;
+  width: auto;
+  max-width: 528px;
+  height: 50px;
+  margin: 0 auto;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+}
+/* "Enter an amount…" / "Pick a category." pops up right above Save, where you are looking. */
+#formError {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(54px + 10px + 50px + 8px + env(safe-area-inset-bottom));
+  z-index: 9;
+  max-width: 528px;
+  margin: 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--card);
+  text-align: center;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
+}
+#view-add { padding-bottom: 66px; } /* room to scroll the Note field clear of Save */
+.toast { bottom: calc(130px + env(safe-area-inset-bottom)); } /* above Save, never on top of it */

@@ -6,7 +6,7 @@ import {
   applyListOps, hasName, sameName, stepAmount,
 } from './logic.js';
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
