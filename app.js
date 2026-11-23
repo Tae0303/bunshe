@@ -5,7 +5,7 @@ import {
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
 } from './logic.js';
 
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.0.2';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#64748b'];
 const OTHER_COLOR = '#94a3b8';
@@ -87,8 +87,17 @@ function setToday() {
 function selectCategory(name) {
   state.category = name;
   for (const b of els.categories.querySelectorAll('[data-cat]')) {
-    b.setAttribute('aria-pressed', String(b.dataset.cat === name));
+    const picked = b.dataset.cat === name;
+    b.setAttribute('aria-pressed', String(picked));
+    if (picked) revealChip(els.categories, b);
   }
+}
+
+/** Slides a sideways-scrolling row so the chip is in view (e.g. a shortcut picked a far-right category). */
+function revealChip(row, chip) {
+  const r = row.getBoundingClientRect();
+  const c = chip.getBoundingClientRect();
+  if (c.left < r.left + 16 || c.right > r.right - 32) row.scrollBy({ left: c.left - r.left - 16, behavior: 'smooth' });
 }
 
 function showError(message) {
