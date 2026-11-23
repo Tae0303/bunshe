@@ -6,7 +6,7 @@ import {
   mergeCategories, mergeShortcuts, hasName,
 } from './logic.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#06b6d4', '#a16207', '#84cc16', '#d946ef'];
