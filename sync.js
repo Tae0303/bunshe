@@ -1,5 +1,5 @@
 // Sync with the Google Sheet through its Apps Script web app (apps-script/Code.gs).
-// Order: send category/shortcut changes, then deleted entries, then new entries, then pull the whole sheet back.
+// Order: category/shortcut changes, deleted entries, edited entries, new entries, then pull the whole sheet back.
 
 import * as db from './db.js';
 
@@ -37,21 +37,28 @@ async function run() {
       const left = ((await db.get('pendingLists')) || []).filter((op) => !sent.has(op.id)); // keep any added meanwhile
       await db.set('pendingLists', left);
     }
-    // 2. Expenses deleted on the phone.
+    // 2. Expenses deleted on the phone (found in the sheet by the values the sheet has).
     const deleted = (await db.allExpenses()).filter((e) => e.status === 'deleted');
     if (deleted.length) {
-      const entries = deleted.map(({ id, date, amount, category, note }) => ({ id, date, amount, category, note }));
+      const entries = deleted.map((e) => ({ id: e.id, ...(e.orig || db.values(e)) }));
       await call(settings, { action: 'delete', entries });
       await db.removeExpenses(deleted.map((e) => e.id));
     }
-    // 3. Expenses waiting on the phone.
+    // 3. Expenses edited on the phone: new values, plus the old ones to find the row.
+    const edited = (await db.allExpenses()).filter((e) => e.status === 'edited');
+    if (edited.length) {
+      const entries = edited.map((e) => ({ id: e.id, ...db.values(e), orig: e.orig }));
+      await call(settings, { action: 'update', entries });
+      await db.settle(entries);
+    }
+    // 4. New expenses waiting on the phone.
     const pending = (await db.allExpenses()).filter((e) => e.status === 'pending');
     if (pending.length) {
-      const entries = pending.map(({ id, date, amount, category, note }) => ({ id, date, amount, category, note }));
+      const entries = pending.map((e) => ({ id: e.id, ...db.values(e) }));
       await call(settings, { action: 'add', entries });
-      await db.markSynced(pending.map((e) => e.id));
+      await db.settle(entries);
     }
-    // 4. Read the whole sheet back.
+    // 5. Read the whole sheet back.
     const data = await call(settings, { action: 'pull' });
     await db.replaceSynced(data.expenses);
     await db.set('categories', data.categories);

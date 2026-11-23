@@ -2,7 +2,7 @@
  * Accountant At Home: the Home-tab script plus a sync API for the Bunshe app.
  *
  * Paste this over the old Code.gs. Everything the Home tab did still works, and:
- *   - doPost() lets the app add and delete entries, add / rename / delete categories and
+ *   - doPost() lets the app add, edit and delete entries, add / rename / delete categories and
  *     shortcuts, and read the sheet back
  *   - fixes spec issues #1 (monthly trigger made "[object Object]"),
  *     #3 (clearing the Shortcut cell threw an error) and #6 (two time zones)
@@ -133,7 +133,7 @@ function doPost(e) {
     const key = PropertiesService.getScriptProperties().getProperty('SYNC_KEY');
     if (!key || req.key !== key) return reply_({ ok: false, error: 'Wrong sync key. Run createSyncKey again and copy the key from the log.' });
     if (req.action === 'pull') return reply_(Object.assign({ ok: true }, pull_()));
-    if (req.action === 'add' || req.action === 'lists' || req.action === 'delete') {
+    if (['add', 'lists', 'delete', 'update'].indexOf(req.action) >= 0) {
       const lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
@@ -144,6 +144,10 @@ function doPost(e) {
         if (req.action === 'delete') {
           const deleted = (req.entries || []).filter(deleteExpense_).length;
           return reply_({ ok: true, deleted: deleted });
+        }
+        if (req.action === 'update') {
+          const updated = (req.entries || []).filter(updateExpense_).length;
+          return reply_({ ok: true, updated: updated });
         }
         const added = req.entries.filter(addFromApp_).length;
         return reply_({ ok: true, added: added });
@@ -170,29 +174,28 @@ function addFromApp_(entry) {
 }
 
 /**
- * Deletes one entry the app deleted. Only its own cells go (Date, Amount, Category, Note and the
- * id in H); the cells below move up, so totals, the chart and other formulas are left alone.
- * Entries the app sent are found by their id. Rows typed in the sheet are found by their old row
- * number, but only if that row still holds the same date, amount, category and note (otherwise
- * the first row that does) — so a moved or edited row is never deleted by mistake.
- * Returns false if there was nothing to delete (already gone, or changed in the sheet).
+ * Finds an entry's row, given the values the sheet row has (`v`: date, amount, category, note).
+ * Entries the app sent are found by their id (column H). Rows typed in the sheet are found by their
+ * old row number, but only if that row still holds the same date, amount, category and note
+ * (otherwise the first row that does) — so a moved or changed row is never touched by mistake.
+ * Returns { sheet, row }, or null when it is not there (already gone, or changed in the sheet).
  */
-function deleteExpense_(e) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date)) throw new Error('Bad date: ' + e.date);
+function findExpense_(id, v) {
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v.date)) throw new Error('Bad date: ' + (v && v.date));
   const tz = tz_();
   const sheet = SpreadsheetApp.getActive().getSheetByName(
-    Utilities.formatDate(Utilities.parseDate(e.date, tz, 'yyyy-MM-dd'), tz, 'MMM yyyy'));
-  if (!sheet) return false;
+    Utilities.formatDate(Utilities.parseDate(v.date, tz, 'yyyy-MM-dd'), tz, 'MMM yyyy'));
+  if (!sheet) return null;
   const last = lastEntryRow_(sheet);
-  if (last < 2) return false;
+  if (last < 2) return null;
   const rows = sheet.getRange(2, 1, last - 1, ID_COL).getValues();
-  const id = String(e.id || '');
+  id = String(id || '');
   const same = (r) =>
     r[0] instanceof Date &&
-    Utilities.formatDate(r[0], tz, 'yyyy-MM-dd') === e.date &&
-    Math.abs((Number(r[1]) || 0) - Number(e.amount)) < 0.005 &&
-    String(r[2]) === String(e.category || '') &&
-    String(r[3]) === String(e.note || '');
+    Utilities.formatDate(r[0], tz, 'yyyy-MM-dd') === v.date &&
+    Math.abs((Number(r[1]) || 0) - Number(v.amount)) < 0.005 &&
+    String(r[2]) === String(v.category || '') &&
+    String(r[3]) === String(v.note || '');
   let i;
   const typedRow = /!(\d+)$/.exec(id); // "Nov 2026!5" = row 5, typed in the sheet
   if (!typedRow) {
@@ -201,10 +204,48 @@ function deleteExpense_(e) {
     const guess = Number(typedRow[1]) - 2;
     i = rows[guess] && !rows[guess][ID_COL - 1] && same(rows[guess]) ? guess : rows.findIndex((r) => !r[ID_COL - 1] && same(r));
   }
-  if (i < 0) return false;
-  const row = i + 2;
-  sheet.getRange(row, 1, 1, 4).deleteCells(SpreadsheetApp.Dimension.ROWS);
-  sheet.getRange(row, ID_COL).deleteCells(SpreadsheetApp.Dimension.ROWS);
+  return i < 0 ? null : { sheet: sheet, row: i + 2 };
+}
+
+/**
+ * Removes only the entry's own cells (Date, Amount, Category, Note and the id in H); the cells
+ * below move up, so totals, the chart and other formulas are left alone.
+ */
+function removeCells_(found) {
+  found.sheet.getRange(found.row, 1, 1, 4).deleteCells(SpreadsheetApp.Dimension.ROWS);
+  found.sheet.getRange(found.row, ID_COL).deleteCells(SpreadsheetApp.Dimension.ROWS);
+}
+
+/** Deletes one entry the app deleted. Returns false if there was nothing to delete. */
+function deleteExpense_(e) {
+  const found = findExpense_(e.id, e);
+  if (!found) return false;
+  removeCells_(found);
+  return true;
+}
+
+/**
+ * Applies one edit made in the app. `u.orig` = the values the sheet row had, to find it.
+ * Same month: the row is updated in place. New month: it moves to that month's tab.
+ * Returns false if the row is gone or was changed in the sheet meanwhile (the sheet wins).
+ */
+function updateExpense_(u) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(u.date)) throw new Error('Bad date: ' + u.date);
+  const amount = Number(u.amount);
+  if (!(amount >= 0)) throw new Error('Bad amount: ' + u.amount);
+  const found = findExpense_(u.id, u.orig || u);
+  if (!found) return false;
+  const tz = tz_();
+  const date = Utilities.parseDate(u.date, tz, 'yyyy-MM-dd');
+  const category = String(u.category || '');
+  const note = String(u.note || '');
+  if (found.sheet.getName() === Utilities.formatDate(date, tz, 'MMM yyyy')) {
+    found.sheet.getRange(found.row, 1, 1, 4).setValues([[date, amount, category, note]]);
+    return true;
+  }
+  const appId = /!\d+$/.test(String(u.id)) ? '' : String(u.id); // rows typed in the sheet have no id
+  removeCells_(found);
+  appendExpense_(date, amount, category, note, appId);
   return true;
 }
 

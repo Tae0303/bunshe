@@ -100,16 +100,22 @@
     </section>
 
     <section id="view-settings" class="view" hidden>
+      <div class="card" id="connectedCard" hidden>
+        <h2 class="section">Google Sheet</h2>
+        <p class="connected"><span class="ok-dot" aria-hidden="true"></span>Connected to your Google Sheet</p>
+        <button type="button" id="changeConnection" class="secondary">Change connection</button>
+      </div>
       <form id="settingsForm" class="card settings" autocomplete="off">
         <h2 class="section">Sync with Google Sheet</h2>
-        <p class="hint">Paste the Web app URL and the sync key from your sheet's Apps Script. The setup steps are in the README.</p>
+        <p class="hint">Paste the Web app URL and the sync key from your sheet's Apps Script. The setup steps are in the README. Once the first sync works, these are tucked away.</p>
         <label>Web app URL
           <input id="syncUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" spellcheck="false">
         </label>
         <label>Sync key
-          <input id="syncKey" type="text" autocapitalize="off" spellcheck="false">
+          <input id="syncKey" class="secret" type="text" autocapitalize="off" autocorrect="off" spellcheck="false">
         </label>
         <button class="primary" type="submit">Save and sync</button>
+        <button type="button" id="cancelConnection" class="secondary" hidden>Cancel</button>
       </form>
       <div class="card">
         <h2 class="section">Status</h2>
@@ -240,8 +246,36 @@
         <dt id="entryNoteLabel">Note</dt><dd id="entryNote"></dd>
         <dt>Sync</dt><dd id="entryStatus"></dd>
       </dl>
+      <button type="button" id="entryEdit" class="primary entry-edit">Edit expense</button>
       <button type="button" id="entryDelete" class="danger">Delete expense</button>
     </div>
+  </dialog>
+
+  <dialog id="editDialog" class="modal" aria-labelledby="editDialogTitle">
+    <form id="editForm" class="modal-body" novalidate autocomplete="off">
+      <h2 id="editDialogTitle" class="section">Edit expense</h2>
+      <div class="field">
+        <label class="label" for="edAmount">Amount (฿)</label>
+        <input id="edAmount" type="text" inputmode="decimal" placeholder="0">
+      </div>
+      <div class="field">
+        <label class="label" for="edCategory">Category</label>
+        <div class="select"><select id="edCategory"></select></div>
+      </div>
+      <div class="field">
+        <label class="label" for="edDate">Date</label>
+        <input id="edDate" type="date">
+      </div>
+      <div class="field">
+        <label class="label" for="edNote">Note</label>
+        <input id="edNote" type="text" placeholder="Optional">
+      </div>
+      <p id="edError" class="error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

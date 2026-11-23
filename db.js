@@ -1,7 +1,9 @@
 // On-phone storage (IndexedDB). Two stores:
 //   expenses — one record per entry: { id, date, amount, category, note, status, seq?, createdAt? }
 //              status 'pending' = saved here, not yet in the sheet; 'synced' = a copy of a sheet row;
-//              'deleted' = deleted here, waiting to be deleted in the sheet (hidden in the app)
+//              'deleted' = deleted here, waiting to be deleted in the sheet (hidden in the app);
+//              'edited' = a sheet row changed here, waiting to be updated in the sheet.
+//              orig = the values the sheet row still has, so the sheet script can find the row.
 //   kv       — small values: settings, categories, shortcuts, lastSync
 
 const DB_NAME = 'bunshe';
@@ -45,14 +47,41 @@ export async function putExpense(entry) {
   return finished(tx);
 }
 
-export async function markSynced(ids) {
-  const wanted = new Set(ids);
-  const current = await allExpenses();
+const VALUE_KEYS = ['date', 'amount', 'category', 'note'];
+/** The four values a sheet row holds. */
+export const values = (e) => ({ date: e.date, amount: e.amount, category: e.category, note: e.note || '' });
+const sameValues = (a, b) => VALUE_KEYS.every((k) => (a[k] ?? '') === (b[k] ?? ''));
+
+/**
+ * After the sheet accepted `sent` (new entries or edits): those entries are now synced.
+ * One changed again while it was being sent becomes 'edited', with orig = what the sheet now has.
+ * One deleted meanwhile stays deleted.
+ */
+export async function settle(sent) {
+  const current = new Map((await allExpenses()).map((e) => [e.id, e]));
   const db = await open();
   const tx = db.transaction('expenses', 'readwrite');
   const store = tx.objectStore('expenses');
-  // Only entries still pending: one deleted while it was being sent stays marked deleted.
-  for (const e of current) if (wanted.has(e.id) && e.status === 'pending') store.put({ ...e, status: 'synced' });
+  for (const s of sent) {
+    const e = current.get(s.id);
+    if (!e || e.status === 'deleted' || e.status === 'synced') continue;
+    const { orig, ...rest } = e;
+    if (sameValues(e, s)) store.put({ ...rest, status: 'synced' });
+    else store.put({ ...rest, status: 'edited', orig: values(s) });
+  }
+  return finished(tx);
+}
+
+/** Changes an entry's values here; the sheet follows on the next sync. */
+export async function updateExpense(id, changes) {
+  const e = (await allExpenses()).find((x) => x.id === id);
+  if (!e || e.status === 'deleted') return;
+  let next = { ...e, ...changes };
+  // A synced row becomes 'edited' and remembers what the sheet has. A pending one is simply sent with its new values.
+  if (e.status === 'synced') next = { ...next, status: 'edited', orig: values(e) };
+  const db = await open();
+  const tx = db.transaction('expenses', 'readwrite');
+  tx.objectStore('expenses').put(next);
   return finished(tx);
 }
 
@@ -78,19 +107,20 @@ export async function removeExpenses(ids) {
 /**
  * The sheet is the main copy: its rows replace every synced entry here.
  * Pending entries stay, unless the sheet already has them (a send whose reply was lost).
- * Entries deleted here stay hidden, even if the sheet still has them, until that deletion is sent.
+ * Entries deleted or edited here keep their local version, even if the sheet still has the old one,
+ * until that change is sent.
  */
 export async function replaceSynced(sheetRows) {
   const inSheet = new Set(sheetRows.map((r) => r.id));
   const current = await allExpenses();
-  const deleted = new Set(current.filter((e) => e.status === 'deleted').map((e) => e.id));
+  const held = new Set(current.filter((e) => e.status === 'deleted' || e.status === 'edited').map((e) => e.id));
   const db = await open();
   const tx = db.transaction('expenses', 'readwrite');
   const store = tx.objectStore('expenses');
   for (const e of current) {
     if (e.status === 'synced' || (e.status === 'pending' && inSheet.has(e.id))) store.delete(e.id);
   }
-  for (const r of sheetRows) if (!deleted.has(r.id)) store.put({ ...r, status: 'synced' });
+  for (const r of sheetRows) if (!held.has(r.id)) store.put({ ...r, status: 'synced' });
   return finished(tx);
 }
 
@@ -101,7 +131,11 @@ export async function renameCategory(from, to) {
   const db = await open();
   const tx = db.transaction('expenses', 'readwrite');
   const store = tx.objectStore('expenses');
-  for (const e of current) if (match(e.category)) store.put({ ...e, category: to });
+  for (const e of current) {
+    // orig too: the sheet renames its rows before it looks for an edited one.
+    const orig = e.orig && match(e.orig.category) ? { ...e.orig, category: to } : e.orig;
+    if (match(e.category) || orig !== e.orig) store.put({ ...e, category: match(e.category) ? to : e.category, orig });
+  }
   return finished(tx);
 }
 

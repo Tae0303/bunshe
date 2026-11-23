@@ -6,7 +6,7 @@ import {
   applyListOps, hasName, sameName,
 } from './logic.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -35,6 +35,9 @@ const els = {
   entriesHint: $('#entriesHint'), entryDialog: $('#entryDialog'), entryAmount: $('#entryAmount'),
   entryCategory: $('#entryCategory'), entryDate: $('#entryDate'), entryNote: $('#entryNote'),
   entryNoteLabel: $('#entryNoteLabel'), entryStatus: $('#entryStatus'), entryDelete: $('#entryDelete'),
+  entryEdit: $('#entryEdit'), editDialog: $('#editDialog'), editForm: $('#editForm'),
+  edAmount: $('#edAmount'), edCategory: $('#edCategory'), edDate: $('#edDate'), edNote: $('#edNote'), edError: $('#edError'),
+  connectedCard: $('#connectedCard'), changeConnection: $('#changeConnection'), cancelConnection: $('#cancelConnection'),
 };
 
 const state = {
@@ -49,6 +52,9 @@ const state = {
   queuedLists: 0, // category/shortcut changes made here, not yet in the sheet
   syncRequested: false, // you tapped Sync now: show progress even when nothing is waiting
   viewing: null, // the expense open in the entry card
+  editingEntry: null, // the expense open in the edit form
+  hasSettings: false, // a Web app URL and key are saved
+  editConnection: false, // "Change connection" tapped: show the URL/key form again
   editing: null, // the shortcut or category name being edited, or null when adding
   returnToList: null, // 'shortcut' | 'category': reopen that list when the edit form closes
 };
@@ -270,7 +276,7 @@ function renderEntries(rows) {
     html += `<li><button type="button" class="entry" data-id="${escapeHtml(e.id)}"><span class="dot" style="background:${colorOf(e.category)}"></span>
       <span class="what"><span class="cat">${escapeHtml(shortName(e.category || 'Uncategorized'))}</span>
       ${e.note ? `<span class="note">${escapeHtml(e.note)}</span>` : ''}</span>
-      ${e.status === 'pending' ? '<span class="pending" title="Saved on this phone, waiting to sync">Not synced</span>' : ''}
+      ${e.status !== 'synced' ? '<span class="pending" title="Changed on this phone, waiting to sync">Not synced</span>' : ''}
       <span class="amt">${formatMoney(e.amount)}</span></button></li>`;
   }
   els.entries.innerHTML = html;
@@ -292,9 +298,57 @@ function openEntryDialog(e) {
   els.entryDate.innerHTML = `<span class="wd" style="background:${DAY_COLORS[w]}">${WEEKDAYS[w]}</span> ${formatDay(e.date)}`;
   els.entryNote.textContent = e.note || '';
   els.entryNote.hidden = els.entryNoteLabel.hidden = !e.note;
-  els.entryStatus.textContent = e.status === 'pending' ? 'Saved on this phone, waiting to sync' : 'In your sheet';
+  els.entryStatus.textContent =
+    e.status === 'pending' ? 'Saved on this phone, waiting to sync'
+      : e.status === 'edited' ? 'Edited on this phone, waiting to sync'
+        : 'In your sheet';
   els.entryDialog.showModal();
 }
+
+/* Edit form: amount, category, date, note. */
+els.entryEdit.addEventListener('click', () => {
+  const e = state.viewing;
+  if (!e) return;
+  els.entryDialog.close();
+  state.editingEntry = e;
+  els.edAmount.value = String(e.amount);
+  const choices = e.category && !hasName(state.categories, e.category) ? [...state.categories, e.category] : state.categories;
+  els.edCategory.innerHTML =
+    '<option value="">Choose a category…</option>' +
+    choices.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  els.edCategory.value = e.category || '';
+  els.edDate.value = e.date;
+  els.edNote.value = e.note || '';
+  dialogError(els.edError, '');
+  els.editDialog.showModal();
+});
+
+els.editForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const e = state.editingEntry;
+  if (!e) return;
+  const amount = parseAmount(els.edAmount.value);
+  const category = els.edCategory.value;
+  const date = els.edDate.value;
+  const note = els.edNote.value.trim();
+  const problem = !(amount > 0)
+    ? 'Enter an amount above 0.'
+    : !category
+      ? 'Pick a category.'
+      : !/^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? 'Pick a date.'
+        : '';
+  if (problem) return dialogError(els.edError, problem);
+  els.editDialog.close();
+  if (amount === e.amount && category === e.category && date === e.date && note === (e.note || '')) return;
+  await db.updateExpense(e.id, { amount, category, date, note }); // shows now; the sheet follows on the next sync
+  await reloadData();
+  const moved = monthKey(date) !== monthKey(e.date);
+  toast(moved ? `Saved · moved to ${monthLabel(monthKey(date))}` : 'Expense saved');
+  syncNow();
+});
+els.editForm.addEventListener('input', () => dialogError(els.edError, ''));
+els.editDialog.addEventListener('close', () => (state.editingEntry = null));
 
 els.entryDelete.addEventListener('click', async () => {
   const e = state.viewing;
@@ -393,7 +447,29 @@ async function fillSettings() {
   els.syncUrl.value = settings.url || '';
   els.syncKey.value = settings.key || '';
   renderSyncInfo();
+  renderConnection();
 }
+
+/**
+ * Once a sync has worked, the URL and key are tucked away behind "Change connection".
+ * They come back by themselves if a sync fails, so a wrong key can be fixed.
+ */
+function renderConnection() {
+  const connected = state.hasSettings && !!state.lastSync && !['error', 'off'].includes(state.sync.state);
+  els.connectedCard.hidden = !connected || state.editConnection;
+  els.settingsForm.hidden = connected && !state.editConnection;
+  els.cancelConnection.hidden = !connected;
+}
+
+els.changeConnection.addEventListener('click', async () => {
+  state.editConnection = true;
+  await fillSettings();
+  els.syncUrl.focus();
+});
+els.cancelConnection.addEventListener('click', () => {
+  state.editConnection = false;
+  renderConnection();
+});
 
 els.badge.addEventListener('click', () => (state.sync.state === 'off' ? showView('settings') : manualSync()));
 els.syncNowBtn.addEventListener('click', manualSync);
@@ -407,8 +483,10 @@ els.settingsForm.addEventListener('submit', async (ev) => {
     return;
   }
   await db.set('settings', { url, key });
+  state.hasSettings = !!(url && key);
+  state.editConnection = false; // tucked away again if this sync works; shown again if it fails
   toast(url && key ? 'Saved. Syncing…' : 'Sync is off.');
-  syncNow();
+  manualSync();
 });
 
 els.exportBtn.addEventListener('click', () => {
@@ -425,7 +503,7 @@ els.exportBtn.addEventListener('click', () => {
 /* ---------- Menu: add, rename and delete shortcuts / categories ---------- */
 
 // Tapping the dimmed backdrop or any [data-close] button closes a dialog.
-for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog, els.listDialog, els.entryDialog]) {
+for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog, els.listDialog, els.entryDialog, els.editDialog]) {
   dialog.addEventListener('click', (ev) => {
     if (ev.target === dialog || ev.target.closest('[data-close]')) dialog.close();
   });
@@ -608,9 +686,10 @@ els.categoryForm.addEventListener('input', () => dialogError(els.catError, ''));
 /* ---------- Data + lifecycle ---------- */
 
 async function reloadData() {
-  const [expenses, categories, shortcuts, lastSync, queue] = await Promise.all([
-    db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'), db.get('pendingLists'),
+  const [expenses, categories, shortcuts, lastSync, queue, settings] = await Promise.all([
+    db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'), db.get('pendingLists'), db.get('settings'),
   ]);
+  state.hasSettings = !!(settings?.url && settings?.key);
   const queued = queue || [];
   const lists = applyListOps({ categories: categories?.length ? categories : DEFAULT_CATEGORIES, shortcuts: shortcuts || [] }, queued);
   state.expenses = expenses;
@@ -623,6 +702,7 @@ async function reloadData() {
   renderMonth();
   renderBadge();
   renderSyncInfo();
+  renderConnection();
 }
 
 onStatus(async (status) => {

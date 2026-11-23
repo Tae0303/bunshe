@@ -277,6 +277,14 @@ main { max-width: 560px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-ar
 .entry-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .entry-facts .dot { vertical-align: 1px; }
 .entry-facts [hidden] { display: none; }
+.modal .entry-edit { height: 48px; margin-top: 20px; font-size: 16px; }
+.modal .entry-edit + .danger { margin-top: 8px; }
+
+/* Settings: connection */
+.connected { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-weight: 600; }
+.ok-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); }
+.secret { -webkit-text-security: disc; } /* the sync key shows as dots, without a password-manager prompt */
+#cancelConnection { margin-top: 8px; }
 .entry .what { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .entry .note { overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .entry .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
