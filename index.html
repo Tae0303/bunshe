@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Log daily spending in a few taps. Works offline and syncs to your Google Sheet.">
+  <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d1015" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Bunshe">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>Bunshe</title>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="title">Add expense</h1>
+    <button id="syncBadge" class="sync" type="button" data-tone="muted">…</button>
+  </header>
+
+  <main>
+    <section id="view-add" class="view">
+      <form id="entry" autocomplete="off" novalidate>
+        <div class="card">
+          <label for="amount" class="label">Amount</label>
+          <div class="amount-row">
+            <span class="currency">฿</span>
+            <input id="amount" inputmode="decimal" placeholder="0" enterkeyhint="done">
+          </div>
+          <div class="steps" role="group" aria-label="Add to the amount">
+            <button type="button" data-step="1">+1</button>
+            <button type="button" data-step="5">+5</button>
+            <button type="button" data-step="10">+10</button>
+            <button type="button" data-step="100">+100</button>
+            <button type="button" id="clearAmount" class="ghost">Clear</button>
+          </div>
+        </div>
+
+        <div class="card" id="shortcutsField" hidden>
+          <span class="label">Shortcuts</span>
+          <div id="shortcuts" class="chips scroll"></div>
+        </div>
+
+        <div class="card">
+          <span class="label" id="categoryLabel">Category</span>
+          <div id="categories" class="chips wrap" role="group" aria-labelledby="categoryLabel"></div>
+        </div>
+
+        <div class="card">
+          <div class="field">
+            <label for="date" class="label">Date</label>
+            <div class="date-row">
+              <input type="date" id="date">
+              <button type="button" id="today" class="ghost-btn">Today</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="note" class="label">Note</label>
+            <input id="note" type="text" placeholder="Optional" enterkeyhint="done">
+          </div>
+        </div>
+
+        <p id="formError" class="error" role="alert" hidden></p>
+        <button id="save" class="primary" type="submit">Save expense</button>
+      </form>
+    </section>
+
+    <section id="view-month" class="view" hidden>
+      <div class="month-nav">
+        <button type="button" id="prevMonth" class="icon-btn" aria-label="Previous month">‹</button>
+        <h2 id="monthLabel"></h2>
+        <button type="button" id="nextMonth" class="icon-btn" aria-label="Next month">›</button>
+      </div>
+      <div class="stats">
+        <div class="card stat"><span class="label">Total</span><strong id="mTotal"></strong><small id="mCount"></small></div>
+        <div class="card stat"><span class="label">Average per day</span><strong id="mAvg"></strong><small id="mDays"></small></div>
+      </div>
+      <div class="card">
+        <span class="label">By category</span>
+        <svg id="donut" viewBox="0 0 120 120" role="img" aria-label="Spending by category"></svg>
+        <table id="catTable" class="cat-table"></table>
+      </div>
+      <ul id="entries" class="entries"></ul>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <form id="settingsForm" class="card settings" autocomplete="off">
+        <h2 class="section">Sync with Google Sheet</h2>
+        <p class="hint">Paste the Web app URL and the sync key from your sheet's Apps Script. The setup steps are in the README.</p>
+        <label>Web app URL
+          <input id="syncUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" spellcheck="false">
+        </label>
+        <label>Sync key
+          <input id="syncKey" type="text" autocapitalize="off" spellcheck="false">
+        </label>
+        <button class="primary" type="submit">Save and sync</button>
+      </form>
+      <div class="card">
+        <h2 class="section">Status</h2>
+        <p id="syncInfo"></p>
+        <button type="button" id="syncNow" class="secondary">Sync now</button>
+      </div>
+      <div class="card">
+        <h2 class="section">Backup</h2>
+        <p class="hint">Download every entry on this phone as a CSV file.</p>
+        <button type="button" id="exportCsv" class="secondary">Export CSV</button>
+      </div>
+      <p class="version">Bunshe <span id="version"></span></p>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Screens">
+    <button type="button" data-view="add" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Add
+    </button>
+    <button type="button" data-view="month">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Month
+    </button>
+    <button type="button" data-view="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings
+    </button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

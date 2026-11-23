@@ -1,0 +1,365 @@
+import * as db from './db.js';
+import { syncNow, onStatus } from './sync.js';
+import {
+  DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
+  parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
+} from './logic.js';
+
+const APP_VERSION = '1.0.0';
+// Category colours, kept clear of the teal accent so a selected chip still shows its dot.
+const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#64748b'];
+const OTHER_COLOR = '#94a3b8';
+const TITLES = { add: 'Add expense', month: 'Month', settings: 'Settings' };
+
+const $ = (selector) => document.querySelector(selector);
+const els = {
+  title: $('#title'), badge: $('#syncBadge'), toast: $('#toast'), version: $('#version'),
+  form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
+  shortcutsField: $('#shortcutsField'), shortcuts: $('#shortcuts'), categories: $('#categories'),
+  date: $('#date'), today: $('#today'), note: $('#note'), error: $('#formError'),
+  monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
+  total: $('#mTotal'), count: $('#mCount'), avg: $('#mAvg'), days: $('#mDays'),
+  donut: $('#donut'), catTable: $('#catTable'), entries: $('#entries'),
+  settingsForm: $('#settingsForm'), syncUrl: $('#syncUrl'), syncKey: $('#syncKey'),
+  syncInfo: $('#syncInfo'), syncNowBtn: $('#syncNow'), exportBtn: $('#exportCsv'),
+};
+
+const state = {
+  categories: DEFAULT_CATEGORIES,
+  shortcuts: [],
+  expenses: [],
+  category: '',
+  month: monthKey(isoDate()),
+  autoDate: '', // the date the app filled in itself; it moves to the new day if untouched
+  sync: { state: 'idle' },
+  lastSync: null,
+};
+
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const colorOf = (category) => {
+  const i = state.categories.indexOf(category);
+  return i >= 0 ? PALETTE[i % PALETTE.length] : OTHER_COLOR;
+};
+const pendingCount = () => state.expenses.filter((e) => e.status === 'pending').length;
+
+function newId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+let toastTimer;
+function toast(message) {
+  els.toast.textContent = message;
+  els.toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (els.toast.hidden = true), 2600);
+}
+
+/* ---------- Views ---------- */
+
+function showView(name) {
+  for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== `view-${name}`;
+  for (const b of document.querySelectorAll('.tabbar button')) {
+    b.setAttribute('aria-current', b.dataset.view === name ? 'page' : 'false');
+  }
+  els.title.textContent = TITLES[name];
+  if (name === 'month') renderMonth();
+  if (name === 'settings') fillSettings();
+  window.scrollTo(0, 0);
+}
+
+/* ---------- Add expense ---------- */
+
+function setAmount(n) {
+  els.amount.value = n > 0 ? String(round2(n)) : '';
+}
+
+function setToday() {
+  state.autoDate = isoDate();
+  els.date.value = state.autoDate;
+}
+
+function selectCategory(name) {
+  state.category = name;
+  for (const b of els.categories.querySelectorAll('[data-cat]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.cat === name));
+  }
+}
+
+function showError(message) {
+  els.error.textContent = message;
+  els.error.hidden = !message;
+}
+
+function resetForm() {
+  setAmount(0);
+  selectCategory('');
+  els.note.value = '';
+  setToday();
+  showError('');
+}
+
+function renderCategories() {
+  els.categories.innerHTML = state.categories
+    .map((c) => `<button type="button" class="chip" data-cat="${escapeHtml(c)}" aria-pressed="${c === state.category}" title="${escapeHtml(c)}">
+      <span class="dot" style="background:${colorOf(c)}"></span>${escapeHtml(shortName(c))}</button>`)
+    .join('');
+}
+
+function renderShortcuts() {
+  els.shortcutsField.hidden = state.shortcuts.length === 0;
+  els.shortcuts.innerHTML = state.shortcuts
+    .map((s, i) => `<button type="button" class="chip" data-shortcut="${i}">
+      <span class="dot" style="background:${colorOf(s.category)}"></span>${escapeHtml(s.name)} <b>${formatMoney(s.amount)}</b></button>`)
+    .join('');
+}
+
+els.steps.forEach((button) =>
+  button.addEventListener('click', () => {
+    const current = parseAmount(els.amount.value);
+    setAmount((Number.isNaN(current) ? 0 : current) + Number(button.dataset.step));
+  }),
+);
+els.clear.addEventListener('click', () => setAmount(0));
+els.today.addEventListener('click', setToday);
+// Any change to the form clears an old "Enter an amount" / "Pick a category" message.
+els.form.addEventListener('click', (ev) => {
+  if (ev.target.closest('button:not([type="submit"])')) showError('');
+});
+els.form.addEventListener('input', () => showError(''));
+
+els.categories.addEventListener('click', (ev) => {
+  const button = ev.target.closest('[data-cat]');
+  if (button) selectCategory(button.dataset.cat);
+});
+
+els.shortcuts.addEventListener('click', (ev) => {
+  const button = ev.target.closest('[data-shortcut]');
+  if (!button) return;
+  const s = state.shortcuts[Number(button.dataset.shortcut)];
+  setAmount(s.amount);
+  if (s.category) selectCategory(s.category);
+  setToday(); // same as the sheet: a shortcut also sets the date to today
+});
+
+els.form.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const amount = parseAmount(els.amount.value);
+  const date = els.date.value;
+  const problem = !(amount > 0)
+    ? 'Enter an amount above 0.'
+    : !state.category
+      ? 'Pick a category.'
+      : !/^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? 'Pick a date.'
+        : '';
+  if (problem) return showError(problem);
+
+  const entry = {
+    id: newId(), date, amount, category: state.category, note: els.note.value.trim(),
+    status: 'pending', createdAt: Date.now(),
+  };
+  try {
+    await db.putExpense(entry);
+  } catch (err) {
+    return showError(`Could not save on this phone: ${err.message}`);
+  }
+  state.expenses.push(entry);
+  toast(`Saved ${formatMoney(amount)} · ${shortName(entry.category)}`);
+  resetForm();
+  renderBadge();
+  syncNow();
+});
+
+/* ---------- Month ---------- */
+
+function renderMonth() {
+  const today = isoDate();
+  const s = summarize(state.expenses, state.month, today);
+  const latest = state.expenses.reduce((max, e) => (e.date > max ? e.date : max), today);
+  els.monthLabel.textContent = monthLabel(state.month);
+  els.next.disabled = state.month >= monthKey(latest);
+  els.total.textContent = formatMoney(s.total);
+  els.count.textContent = `${s.count} ${s.count === 1 ? 'entry' : 'entries'}`;
+  els.avg.textContent = s.perDay == null ? '—' : formatMoney(s.perDay);
+  els.days.textContent = s.days ? `over ${s.days} ${s.days === 1 ? 'day' : 'days'}` : '';
+  renderDonut(s);
+  els.catTable.innerHTML = s.categories.length
+    ? `<thead><tr><th>Category</th><th>Total</th><th>Per day</th></tr></thead><tbody>${s.categories
+        .map((c) => `<tr><td><span class="dot" style="background:${colorOf(c.name)}"></span>${escapeHtml(shortName(c.name))}</td>
+          <td>${formatMoney(c.total)}</td><td>${c.perDay == null ? '—' : formatMoney(c.perDay)}</td></tr>`)
+        .join('')}</tbody>`
+    : '';
+  renderEntries(s.rows);
+}
+
+function renderDonut(s) {
+  const r = 46;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = s.total > 0
+    ? s.categories.map((c) => {
+        const length = (c.total / s.total) * circumference;
+        const arc = `<circle r="${r}" cx="60" cy="60" fill="none" stroke="${colorOf(c.name)}" stroke-width="20"
+          stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}">
+          <title>${escapeHtml(shortName(c.name))}: ${formatMoney(c.total)}</title></circle>`;
+        offset += length;
+        return arc;
+      }).join('')
+    : '';
+  els.donut.innerHTML = `<g transform="rotate(-90 60 60)"><circle r="${r}" cx="60" cy="60" fill="none" stroke="var(--line)" stroke-width="20"/>${arcs}</g>`;
+}
+
+function renderEntries(rows) {
+  if (!rows.length) {
+    els.entries.innerHTML = '<li class="empty">No entries this month.</li>';
+    return;
+  }
+  const dayTotals = new Map();
+  for (const e of rows) dayTotals.set(e.date, round2((dayTotals.get(e.date) || 0) + e.amount));
+  let html = '';
+  let day = '';
+  for (const e of rows) {
+    if (e.date !== day) {
+      day = e.date;
+      const w = weekdayIndex(day);
+      html += `<li class="day"><span class="wd" style="background:${DAY_COLORS[w]}">${WEEKDAYS[w]}</span>
+        <span>${formatDay(day)}</span><span class="day-total">${formatMoney(dayTotals.get(day))}</span></li>`;
+    }
+    html += `<li class="entry"><span class="dot" style="background:${colorOf(e.category)}"></span>
+      <span class="what"><span class="cat">${escapeHtml(shortName(e.category || 'Uncategorized'))}</span>
+      ${e.note ? `<span class="note">${escapeHtml(e.note)}</span>` : ''}</span>
+      ${e.status === 'pending' ? '<span class="pending" title="Saved on this phone, waiting to sync">Not synced</span>' : ''}
+      <span class="amt">${formatMoney(e.amount)}</span></li>`;
+  }
+  els.entries.innerHTML = html;
+}
+
+els.prev.addEventListener('click', () => {
+  state.month = shiftMonth(state.month, -1);
+  renderMonth();
+});
+els.next.addEventListener('click', () => {
+  state.month = shiftMonth(state.month, 1);
+  renderMonth();
+});
+
+/* ---------- Sync status + settings ---------- */
+
+function statusText() {
+  const n = pendingCount();
+  switch (state.sync.state) {
+    case 'off': return ['Not connected', 'muted'];
+    case 'idle': return ['…', 'muted'];
+    case 'syncing': return ['Syncing…', 'muted'];
+    case 'offline': return [n ? `Offline · ${n} waiting` : 'Offline', 'warn'];
+    case 'error': return ['Sync failed', 'error'];
+    default: return n ? [`${n} waiting`, 'warn'] : ['Synced', 'ok'];
+  }
+}
+
+function renderBadge() {
+  const [text, tone] = statusText();
+  els.badge.textContent = text;
+  els.badge.dataset.tone = tone;
+}
+
+function renderSyncInfo() {
+  const last = state.lastSync
+    ? new Date(state.lastSync).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'never';
+  const lines = [
+    `<b>Status:</b> ${escapeHtml(statusText()[0])}`,
+    `<b>Last synced:</b> ${escapeHtml(last)}`,
+    `<b>Waiting to sync:</b> ${pendingCount()}`,
+  ];
+  if (state.sync.state === 'error' && state.sync.message) lines.push(`<span class="error">${escapeHtml(state.sync.message)}</span>`);
+  els.syncInfo.innerHTML = lines.join('<br>');
+}
+
+async function fillSettings() {
+  const settings = (await db.get('settings')) || {};
+  els.syncUrl.value = settings.url || '';
+  els.syncKey.value = settings.key || '';
+  renderSyncInfo();
+}
+
+els.badge.addEventListener('click', () => (state.sync.state === 'off' ? showView('settings') : syncNow()));
+els.syncNowBtn.addEventListener('click', () => syncNow());
+
+els.settingsForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const url = els.syncUrl.value.trim();
+  const key = els.syncKey.value.trim();
+  if (url && !/^(https:\/\/|http:\/\/localhost[:/])/.test(url)) {
+    toast('The Web app URL should start with https://');
+    return;
+  }
+  await db.set('settings', { url, key });
+  toast(url && key ? 'Saved. Syncing…' : 'Sync is off.');
+  syncNow();
+});
+
+els.exportBtn.addEventListener('click', () => {
+  const blob = new Blob(['﻿' + toCsv(state.expenses)], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `bunshe-${isoDate()}.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+});
+
+/* ---------- Data + lifecycle ---------- */
+
+async function reloadData() {
+  const [expenses, categories, shortcuts, lastSync] = await Promise.all([
+    db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'),
+  ]);
+  state.expenses = expenses;
+  state.categories = categories?.length ? categories : DEFAULT_CATEGORIES;
+  state.shortcuts = shortcuts || [];
+  state.lastSync = lastSync || null;
+  renderCategories();
+  renderShortcuts();
+  renderMonth();
+  renderBadge();
+  renderSyncInfo();
+}
+
+onStatus(async (status) => {
+  state.sync = status;
+  if (status.state === 'syncing') renderBadge();
+  else await reloadData();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  // Replaces the sheet's daily trigger: an untouched date moves on to the new day.
+  if (els.date.value === state.autoDate && state.autoDate !== isoDate()) setToday();
+  renderMonth();
+  syncNow();
+});
+window.addEventListener('online', () => syncNow());
+setInterval(() => {
+  if (pendingCount() && navigator.onLine) syncNow();
+}, 60_000);
+
+async function init() {
+  els.version.textContent = APP_VERSION;
+  document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.storage?.persist?.().catch(() => {});
+  resetForm();
+  await reloadData();
+  showView('add');
+  syncNow();
+}
+
+init();

@@ -1,0 +1,12 @@
+{
+  "name": "bunshe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Expense tracker PWA that syncs to the Accountant At Home Google Sheet",
+  "type": "module",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node --test tests/logic.test.mjs",
+    "icons": "node tools/make-icons.mjs"
+  }
+}
