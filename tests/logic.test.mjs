@@ -5,6 +5,20 @@ import {
   applyListOps, hasName, stepAmount, sortByOrder, moveTo,
 } from '../logic.js';
 
+test('category colours: set, follow a rename, keep the target colour on a merge, go on delete', () => {
+  const sheet = { categories: ['Food', 'Transit', 'Others'], shortcuts: [], colors: { Food: '#f97316', ' transit ': '#3b82f6' } };
+  const r = applyListOps(sheet, [
+    { type: 'categoryColor', name: 'Others', color: '#64748b' },
+    { type: 'renameCategory', from: 'Food', to: '🍜 Food' },
+    { type: 'categoryColor', name: 'Transit', color: '#123456' },
+  ]);
+  assert.deepEqual(r.colors, { '🍜 food': '#f97316', transit: '#123456', others: '#64748b' });
+  const merged = applyListOps(sheet, [{ type: 'renameCategory', from: 'Food', to: 'Transit' }]);
+  assert.equal(merged.colors.transit, '#3b82f6');
+  assert.equal(merged.colors.food, undefined);
+  assert.equal(applyListOps(sheet, [{ type: 'deleteCategory', name: 'food' }]).colors.food, undefined);
+});
+
 test('drag reorder: take an item from one place and drop it at another', () => {
   assert.deepEqual(moveTo(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd']);
   assert.deepEqual(moveTo(['a', 'b', 'c', 'd'], 3, 1), ['a', 'd', 'b', 'c']);

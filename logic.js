@@ -108,6 +108,8 @@ export const shortName = (category) => category.replace(/\s*\(.*\)\s*$/, '') || 
 /** Names match ignoring case and surrounding spaces ("transit" = "Transit "). */
 export const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 export const hasName = (names, name) => names.some((n) => sameName(n, name));
+/** Key for looking a category up by name (colours): lower case, no surrounding spaces. */
+export const nameKey = (name) => String(name).trim().toLowerCase();
 
 /**
  * Category and shortcut changes made on the phone wait in a queue until they reach the sheet.
@@ -121,10 +123,14 @@ export const hasName = (names, name) => names.some((n) => sameName(n, name));
  *   { type: 'deleteShortcut', name }
  *   { type: 'reorderCategories', order: [names] }      the full new order
  *   { type: 'reorderShortcuts', order: [names] }
+ *   { type: 'categoryColor', name, color }             '#rrggbb', kept in the Categories tab, column B
+ * Colours are keyed by nameKey(category); a renamed category keeps its colour.
  */
 export function applyListOps(fromSheet, queue) {
   let categories = [...fromSheet.categories];
   let shortcuts = fromSheet.shortcuts.map((s) => ({ ...s }));
+  const colors = {};
+  for (const [name, color] of Object.entries(fromSheet.colors || {})) colors[nameKey(name)] = color;
   const putShortcut = (key, s) => {
     const i = shortcuts.findIndex((x) => sameName(x.name, key));
     if (i >= 0) shortcuts[i] = s;
@@ -143,10 +149,20 @@ export function applyListOps(fromSheet, queue) {
           categories[i] = op.to;
         }
         shortcuts = shortcuts.map((s) => (sameName(s.category, op.from) ? { ...s, category: op.to } : s));
+        const f = nameKey(op.from);
+        const t = nameKey(op.to);
+        if (f !== t && colors[f] !== undefined) {
+          if (colors[t] === undefined) colors[t] = colors[f]; // merging into an existing one keeps that one's colour
+          delete colors[f];
+        }
         break;
       }
       case 'deleteCategory':
         categories = categories.filter((c) => !sameName(c, op.name));
+        delete colors[nameKey(op.name)];
+        break;
+      case 'categoryColor':
+        colors[nameKey(op.name)] = op.color;
         break;
       case 'shortcut':
         putShortcut(op.name, { name: op.name, amount: op.amount, category: op.category });
@@ -165,7 +181,7 @@ export function applyListOps(fromSheet, queue) {
         break;
     }
   }
-  return { categories, shortcuts };
+  return { categories, shortcuts, colors };
 }
 
 /**

@@ -3,10 +3,10 @@ import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
-  applyListOps, hasName, sameName, stepAmount, moveTo,
+  applyListOps, hasName, sameName, stepAmount, moveTo, nameKey,
 } from './logic.js';
 
-const APP_VERSION = '1.6.2';
+const APP_VERSION = '1.7.0';
 const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -31,6 +31,7 @@ const els = {
   scName: $('#scName'), scAmount: $('#scAmount'), scCategory: $('#scCategory'), scError: $('#scError'),
   scSubmit: $('#scSubmit'), scDelete: $('#scDelete'),
   categoryDialog: $('#categoryDialog'), categoryForm: $('#categoryForm'), catTitle: $('#categoryDialogTitle'),
+  catSwatches: $('#catSwatches'),
   catName: $('#catName'), catError: $('#catError'), catHint: $('#catHint'), catSubmit: $('#catSubmit'), catDelete: $('#catDelete'),
   listDialog: $('#listDialog'), listTitle: $('#listDialogTitle'), listItems: $('#listItems'), listAdd: $('#listAdd'),
   entriesHint: $('#entriesHint'), entryDialog: $('#entryDialog'), entryAmount: $('#entryAmount'),
@@ -60,34 +61,62 @@ const state = {
   editing: null, // the shortcut or category name being edited, or null when adding
   returnToList: null, // 'shortcut' | 'category': reopen that list when the edit form closes
   colorMap: {}, // category (lower case) → palette index, so colours survive reordering and renaming
+  sheetColors: {}, // category (lower case) → '#rrggbb' saved in the sheet (or picked here, waiting to sync)
+  colorsInSheet: false, // the sheet script keeps colours (it sent a colour column on the last pull)
+  pickedColor: '', // the colour chosen in the category form
 };
 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 /*
- * Each category keeps its colour, whatever its place in the list: the first time the app sees a
- * category it gets the first free colour, remembered on this phone. "Others" is always slate.
+ * Category colours. A colour saved in the sheet (Categories tab, column B, or picked in the app)
+ * wins. Until a category has one, it gets the first free colour, remembered on this phone; the
+ * first sync with an up-to-date sheet script copies those into the sheet. "Others" defaults to slate.
  */
-const colorKey = (name) => String(name).trim().toLowerCase();
+const colorKey = nameKey;
 const colorOf = (category) => {
-  if (!category || category === 'Others') return OTHER_COLOR;
+  if (!category) return OTHER_COLOR;
+  const saved = state.sheetColors[colorKey(category)];
+  if (saved) return saved;
+  if (category === 'Others') return OTHER_COLOR;
   const i = state.colorMap[colorKey(category)];
   return i === undefined ? OTHER_COLOR : PALETTE[i % PALETTE.length];
 };
 function assignColors() {
-  const used = new Set(Object.values(state.colorMap));
+  const usedHex = new Set(Object.values(state.sheetColors));
+  for (const i of Object.values(state.colorMap)) usedHex.add(PALETTE[i % PALETTE.length]);
   let changed = false;
   for (const c of state.categories) {
-    if (c === 'Others' || state.colorMap[colorKey(c)] !== undefined) continue;
-    let i = 0;
-    while (used.has(i) && i < PALETTE.length) i++;
-    if (i === PALETTE.length) i = used.size % PALETTE.length; // more categories than colours: start reusing
-    state.colorMap[colorKey(c)] = i;
-    used.add(i);
+    const k = colorKey(c);
+    if (c === 'Others' || state.sheetColors[k] || state.colorMap[k] !== undefined) continue;
+    let i = PALETTE.findIndex((hex) => !usedHex.has(hex));
+    if (i < 0) i = Object.keys(state.colorMap).length % PALETTE.length; // more categories than colours: reuse
+    state.colorMap[k] = i;
+    usedHex.add(PALETTE[i]);
     changed = true;
   }
   if (changed) db.set('categoryColors', state.colorMap);
 }
+/** A colour no category is using yet, for a new one. */
+const freeColor = () => PALETTE.find((hex) => !state.categories.some((c) => colorOf(c) === hex)) || PALETTE[0];
+
+/** First sync with a sheet script that keeps colours: copy every colour the sheet does not have yet. */
+async function seedSheetColors() {
+  if (!state.colorsInSheet) return;
+  const queue = (await db.get('pendingLists')) || [];
+  const waiting = new Set(queue.filter((op) => op.type === 'categoryColor').map((op) => colorKey(op.name)));
+  const missing = state.categories.filter(
+    (c) => !state.sheetColors[colorKey(c)] && !waiting.has(colorKey(c)) && !seeded.has(colorKey(c)),
+  );
+  if (!missing.length) return;
+  for (const c of missing) {
+    seeded.add(colorKey(c)); // once per session: never loop if the sheet could not store one
+    queue.push({ id: newId(), type: 'categoryColor', name: c, color: colorOf(c) });
+  }
+  await db.set('pendingLists', queue);
+  await reloadData();
+}
+const seeded = new Set();
 // Waiting to sync: new entries, deleted entries, and category/shortcut changes.
 const pendingCount = () => state.expenses.filter((e) => e.status !== 'synced').length + state.queuedLists;
 // What the app shows: everything except entries deleted here (they wait only to be deleted in the sheet).
@@ -738,19 +767,60 @@ function openShortcutDialog(existing = null) {
 /** Add form when `existing` is empty; rename form (with Delete) for an existing category. */
 function openCategoryDialog(existing = null) {
   state.editing = existing;
-  els.catTitle.textContent = existing ? 'Rename category' : 'Add category';
+  els.catTitle.textContent = existing ? 'Edit category' : 'Add category';
   els.catSubmit.textContent = existing ? 'Save' : 'Add';
   els.catDelete.hidden = !existing;
   els.catHint.hidden = !existing;
   els.catName.value = existing || '';
+  state.pickedColor = existing ? colorOf(existing) : freeColor();
+  renderSwatches();
   dialogError(els.catError, '');
   els.categoryDialog.showModal();
 }
 
-/** Queues a category/shortcut change for the sheet and shows it right away. */
-async function queueListItem(item) {
+/* Colour swatches in the category form: the palette, slate, and 🌈 for any colour (the system picker). */
+const SWATCHES = [...PALETTE, OTHER_COLOR];
+
+function renderSwatches() {
+  els.catSwatches.innerHTML =
+    SWATCHES.map((hex) => `<button type="button" class="swatch" data-color="${hex}" style="background:${hex}" aria-label="Colour ${hex}"></button>`).join('') +
+    '<label class="swatch custom" title="Any colour"><input type="color" id="catCustomColor" aria-label="Pick any colour"></label>';
+  markSwatch();
+}
+
+/** Marks the picked colour without rebuilding the swatches (so an open colour picker stays open). */
+function markSwatch() {
+  const picked = state.pickedColor;
+  let onPalette = false;
+  for (const b of els.catSwatches.querySelectorAll('[data-color]')) {
+    const on = b.dataset.color === picked;
+    b.classList.toggle('picked', on);
+    b.setAttribute('aria-pressed', String(on));
+    onPalette ||= on;
+  }
+  const custom = els.catSwatches.querySelector('.custom');
+  custom.classList.toggle('picked', !onPalette);
+  custom.style.background = onPalette ? '' : picked;
+  const input = custom.querySelector('input');
+  if (input.value !== picked) input.value = picked;
+}
+
+els.catSwatches.addEventListener('click', (ev) => {
+  const swatch = ev.target.closest('[data-color]');
+  if (!swatch) return;
+  state.pickedColor = swatch.dataset.color;
+  markSwatch();
+});
+els.catSwatches.addEventListener('input', (ev) => {
+  if (ev.target.id !== 'catCustomColor') return;
+  state.pickedColor = ev.target.value.toLowerCase();
+  markSwatch();
+});
+
+/** Queues category/shortcut changes for the sheet and shows them right away. */
+async function queueListItem(...items) {
   const queue = (await db.get('pendingLists')) || [];
-  queue.push({ id: newId(), ...item });
+  for (const item of items) queue.push({ id: newId(), ...item });
   await db.set('pendingLists', queue);
   await reloadData();
   syncNow();
@@ -798,14 +868,16 @@ els.categoryForm.addEventListener('submit', async (ev) => {
       ? `"${name}" is already a category.`
       : '';
   if (problem) return dialogError(els.catError, problem);
+  const color = state.pickedColor;
   if (!original) {
-    await queueListItem({ type: 'category', name });
+    await queueListItem({ type: 'category', name }, { type: 'categoryColor', name, color });
     els.categoryDialog.close();
     selectCategory(name); // ready to use straight away
     toast(`Category "${name}" added`);
     return;
   }
-  if (name !== original) {
+  const renamed = name !== original;
+  if (renamed) {
     const wasPicked = sameName(state.category, original);
     // The colour goes with the category.
     if (state.colorMap[colorKey(original)] !== undefined) {
@@ -817,8 +889,10 @@ els.categoryForm.addEventListener('submit', async (ev) => {
     await queueListItem({ type: 'renameCategory', from: original, to: name });
     if (wasPicked) selectCategory(name);
   }
+  const recolored = color !== colorOf(name);
+  if (recolored) await queueListItem({ type: 'categoryColor', name, color });
   els.categoryDialog.close();
-  toast(`Renamed to "${name}"`);
+  if (renamed || recolored) toast(renamed ? `Renamed to "${name}"` : 'Colour saved');
 });
 
 els.catDelete.addEventListener('click', async () => {
@@ -836,17 +910,22 @@ els.categoryForm.addEventListener('input', () => dialogError(els.catError, ''));
 /* ---------- Data + lifecycle ---------- */
 
 async function reloadData() {
-  const [expenses, categories, shortcuts, lastSync, queue, settings, colors] = await Promise.all([
+  const [expenses, categories, shortcuts, lastSync, queue, settings, colors, sheetColors] = await Promise.all([
     db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'), db.get('pendingLists'), db.get('settings'),
-    db.get('categoryColors'),
+    db.get('categoryColors'), db.get('sheetColors'),
   ]);
   state.colorMap = colors || {};
+  state.colorsInSheet = sheetColors != null;
   state.hasSettings = !!(settings?.url && settings?.key);
   const queued = queue || [];
-  const lists = applyListOps({ categories: categories?.length ? categories : DEFAULT_CATEGORIES, shortcuts: shortcuts || [] }, queued);
+  const lists = applyListOps(
+    { categories: categories?.length ? categories : DEFAULT_CATEGORIES, shortcuts: shortcuts || [], colors: sheetColors || {} },
+    queued,
+  );
   state.expenses = expenses;
   state.categories = lists.categories;
   state.shortcuts = lists.shortcuts;
+  state.sheetColors = lists.colors;
   state.queuedLists = queued.length;
   state.lastSync = lastSync || null;
   assignColors();
@@ -863,6 +942,7 @@ onStatus(async (status) => {
   if (status.state === 'syncing') return renderBadge();
   state.syncRequested = false;
   await reloadData();
+  if (status.state === 'ok') await seedSheetColors();
   // Something changed while that sync was running: send it now rather than at the next minute.
   if (status.state === 'ok' && pendingCount()) setTimeout(syncNow, 300);
 });

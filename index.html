@@ -208,7 +208,11 @@
         <label class="label" for="catName">Name</label>
         <input id="catName" type="text" maxlength="60" placeholder="e.g. Gifts" autofocus>
       </div>
-      <p id="catHint" class="hint modal-hint" hidden>Renaming also updates past entries and shortcuts in this category.</p>
+      <div class="field">
+        <span class="label" id="catColorLabel">Colour</span>
+        <div class="swatches" id="catSwatches" role="group" aria-labelledby="catColorLabel"></div>
+      </div>
+      <p id="catHint" class="hint modal-hint" hidden>Renaming also updates past entries and shortcuts in this category. The colour is saved in your sheet's Categories tab, column B.</p>
       <p id="catError" class="error" role="alert" hidden></p>
       <div class="modal-actions">
         <button type="button" class="secondary" data-close>Cancel</button>

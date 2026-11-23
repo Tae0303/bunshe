@@ -3,7 +3,8 @@
  *
  * Paste this over the old Code.gs. Everything the Home tab did still works, and:
  *   - doPost() lets the app add, edit and delete entries, add / rename / delete / reorder
- *     categories and shortcuts, and read the sheet back
+ *     categories and shortcuts, set category colours (Categories tab, column B), and read the
+ *     sheet back
  *   - fixes spec issues #1 (monthly trigger made "[object Object]"),
  *     #3 (clearing the Shortcut cell threw an error) and #6 (two time zones)
  * Setup steps: README.md in the app's repository.
@@ -20,7 +21,15 @@ function tz_() {
 
 function onEdit(e) {
   const range = e.range;
-  if (range.getSheet().getName() !== 'Home') return;
+  const tab = range.getSheet().getName();
+  // A colour typed into Categories column B: fill the cell with it so it can be seen.
+  if (tab === 'Categories' && range.getColumn() === 2 && range.getNumRows() === 1 && range.getNumColumns() === 1) {
+    const hex = hex_(range.getValue());
+    if (hex) paintColorCell_(range, hex);
+    else if (range.getValue() === '') paintColorCell_(range, '');
+    return;
+  }
+  if (tab !== 'Home') return;
   switch (range.getA1Notation()) {
     case 'D2':
       if (range.getValue() === true) {
@@ -264,8 +273,47 @@ function applyListOp_(op) {
     case 'deleteShortcut': return deleteShortcut_(op.name);
     case 'reorderCategories': return reorderCategories_(op.order || []);
     case 'reorderShortcuts': return reorderShortcuts_(op.order || []);
+    case 'categoryColor': return setCategoryColor_(op.name, op.color);
     default: throw new Error('Unknown change: ' + (op && op.type));
   }
+}
+
+/* Category colours live in the Categories tab, column B, as '#rrggbb'; the cell is filled with it. */
+
+/** '#F97316', 'f97316' → '#f97316'; anything else → ''. */
+function hex_(value) {
+  const v = String(value || '').trim().replace(/^#?/, '#').toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(v) ? v : '';
+}
+
+/** Writes a colour into a cell and fills the cell with it (white or black text, whichever reads). */
+function paintColorCell_(cell, color) {
+  if (!color) {
+    cell.clearContent().setBackground(null).setFontColor(null);
+    return;
+  }
+  const n = parseInt(color.slice(1), 16);
+  const light = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 150;
+  cell.setValue(color).setBackground(color).setFontColor(light ? '#000000' : '#ffffff');
+}
+
+function setCategoryColor_(name, color) {
+  const hex = hex_(color);
+  if (!hex) throw new Error('Bad colour: ' + color);
+  const c = categoryCells_();
+  const row = c.rowOf(name);
+  if (row) paintColorCell_(c.sheet.getRange(row, 2), hex);
+}
+
+/** { category name: '#rrggbb' } for every category with a colour in column B. */
+function categoryColors_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName('Categories');
+  const out = {};
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues().forEach(([name, color]) => {
+    if (name !== '' && hex_(color)) out[String(name)] = hex_(color);
+  });
+  return out;
 }
 
 /** Same as sortByOrder in the app's logic.js: names in `order` first, the rest after in their old order. */
@@ -280,16 +328,28 @@ function sortByOrder_(items, order, nameOf) {
     .map((x) => x.item);
 }
 
-/** New category order. Names move between the cells that hold names, so blank rows stay blank. */
+/**
+ * New category order. Each name moves with its colour (column B) between the cells that hold
+ * names, so blank rows stay blank.
+ */
 function reorderCategories_(order) {
   const c = categoryCells_();
   const filled = [];
   c.values.forEach(([v], i) => { if (v !== '') filled.push(i); });
   if (filled.length < 2) return;
-  const sorted = sortByOrder_(filled.map((i) => c.values[i][0]), order, (v) => v);
-  filled.forEach((i, k) => { c.values[i][0] = sorted[k]; });
   const span = filled[filled.length - 1] + 1;
-  c.sheet.getRange(2, 1, span, 1).setValues(c.values.slice(0, span));
+  const range = c.sheet.getRange(2, 1, span, 2);
+  const values = range.getValues();
+  const fills = range.getBackgrounds();
+  const inks = range.getFontColors();
+  const rows = filled.map((i) => ({ value: values[i], fill: fills[i], ink: inks[i] }));
+  const sorted = sortByOrder_(rows, order, (r) => r.value[0]);
+  filled.forEach((i, k) => {
+    values[i] = sorted[k].value;
+    fills[i] = sorted[k].fill;
+    inks[i] = sorted[k].ink;
+  });
+  range.setValues(values).setBackgrounds(fills).setFontColors(inks);
 }
 
 /** New shortcut order. Whole rows (name, amount, category) move; the "-" reset row and blank rows stay put. */
@@ -343,8 +403,13 @@ function renameCategory_(from, to) {
   const row = c.rowOf(from);
   const taken = !sameName_(from, to) && c.rowOf(to);
   if (row) {
-    if (taken) c.sheet.getRange(row, 1).clearContent(); // the new name already exists: the two become one
-    else c.sheet.getRange(row, 1).setValue(to);
+    if (taken) {
+      // The new name already exists: the two become one (and keep that one's colour).
+      c.sheet.getRange(row, 1).clearContent();
+      paintColorCell_(c.sheet.getRange(row, 2), '');
+    } else {
+      c.sheet.getRange(row, 1).setValue(to); // the colour in column B stays on this row, so it follows
+    }
   }
   const ss = SpreadsheetApp.getActive();
   ss.getSheets().filter((s) => MONTH_TAB.test(s.getName())).forEach((s) => replaceInColumn_(s, 3, from, to));
@@ -358,7 +423,9 @@ function renameCategory_(from, to) {
 function deleteCategory_(name) {
   const c = categoryCells_();
   const row = c.rowOf(name);
-  if (row) c.sheet.getRange(row, 1).clearContent();
+  if (!row) return;
+  c.sheet.getRange(row, 1).clearContent();
+  paintColorCell_(c.sheet.getRange(row, 2), '');
 }
 
 function replaceInColumn_(sheet, col, from, to) {
@@ -413,6 +480,7 @@ function pull_() {
   return {
     expenses: expenses,
     categories: listRows_('Categories', 1).map((r) => String(r[0])),
+    colors: categoryColors_(),
     shortcuts: listRows_('Shortcut', 3)
       .filter((r) => r[0] !== '-')
       .map((r) => ({ name: String(r[0]), amount: Number(r[1]) || 0, category: String(r[2]) })),

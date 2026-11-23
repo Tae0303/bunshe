@@ -62,6 +62,8 @@ async function run() {
     const data = await call(settings, { action: 'pull' });
     await db.replaceSynced(data.expenses);
     await db.set('categories', data.categories);
+    // null = the sheet script is older and has no colour column yet: the app then keeps its own colours.
+    await db.set('sheetColors', data.colors ?? null);
     await db.set('shortcuts', data.shortcuts);
     await db.set('lastSync', new Date().toISOString());
     report({ state: 'ok' });
@@ -89,7 +91,7 @@ async function call(settings, payload) {
   } catch {
     throw new Error('Unexpected reply. Check the Web app URL, and that access is set to "Anyone".');
   }
-  if (!data.ok && /^Unknown action/.test(data.error || '')) {
+  if (!data.ok && /^Unknown (action|change)/.test(data.error || '')) {
     throw new Error('The sheet script is out of date. Paste the latest Code.gs and deploy a new version (see README).');
   }
   if (!data.ok) throw new Error(data.error || 'The sheet script reported an error.');
