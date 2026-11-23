@@ -632,3 +632,11 @@ main { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.18); /* keeps the pale dots visible on a light field */
 }
+
+/* ---------- Shortcut chips: "name ฿amount", long names cut with "…" ---------- */
+
+.shortcut-chip { gap: 6px; }
+.sc-name { max-width: 9.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-amt { font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] .sc-amt { color: inherit; }
+.shortcuts-empty { margin: 0; color: var(--muted); font-size: 14px; }

@@ -2,11 +2,11 @@ import * as db from './db.js';
 import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, WEEKDAY_NAMES, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
-  parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
+  parseAmount, round2, formatMoney, shortMoney, formatDay, shortName, weekdayIndex, toCsv,
   applyListOps, hasName, sameName, stepAmount, moveTo, nameKey,
 } from './logic.js';
 
-const APP_VERSION = '1.7.5';
+const APP_VERSION = '1.8.0';
 const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -19,7 +19,7 @@ const els = {
   title: $('#title'), badge: $('#syncBadge'), toast: $('#toast'), version: $('#version'),
   form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
   stepsGroup: $('#steps'), minusMode: $('#minusMode'),
-  shortcut: $('#shortcut'), categories: $('#categories'),
+  shortcuts: $('#shortcuts'), shortcutsEmpty: $('#shortcutsEmpty'), categories: $('#categories'),
   date: $('#date'), dateDot: $('#dateDot'), today: $('#today'), note: $('#note'), error: $('#formError'),
   monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
   total: $('#mTotal'), count: $('#mCount'), avg: $('#mAvg'), days: $('#mDays'),
@@ -48,6 +48,7 @@ const state = {
   shortcuts: [],
   expenses: [],
   category: '',
+  shortcutPicked: '', // the shortcut chip last tapped (highlighted until the form resets)
   minus: false, // "− Subtract" is on: the step buttons take away
   month: monthKey(isoDate()),
   autoDate: '', // the date the app filled in itself; it moves to the new day if untouched
@@ -209,7 +210,7 @@ function resetForm() {
   setAmount(0);
   setMinus(false);
   selectCategory('');
-  els.shortcut.value = '';
+  pickShortcut('');
   els.note.value = '';
   setToday();
   showError('');
@@ -222,14 +223,21 @@ function renderCategories() {
     .join('');
 }
 
+/** Shortcut chips: one sideways-scrolling row, each "name ฿amount" (long names end in "…"). */
 function renderShortcuts() {
   const none = state.shortcuts.length === 0;
-  const picked = els.shortcut.value;
-  els.shortcut.disabled = none;
-  els.shortcut.innerHTML =
-    `<option value="">${none ? 'No shortcuts yet · add one from ☰' : 'Choose a shortcut…'}</option>` +
-    state.shortcuts.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)} · ${formatMoney(s.amount)}</option>`).join('');
-  if (state.shortcuts.some((s) => s.name === picked)) els.shortcut.value = picked; // a sync mid-entry keeps the pick
+  els.shortcuts.hidden = none;
+  els.shortcutsEmpty.hidden = !none;
+  if (!state.shortcuts.some((s) => s.name === state.shortcutPicked)) state.shortcutPicked = ''; // gone after a sync
+  els.shortcuts.innerHTML = state.shortcuts
+    .map((s) => `<button type="button" class="chip shortcut-chip" data-shortcut="${escapeHtml(s.name)}" aria-pressed="${s.name === state.shortcutPicked}" title="${escapeHtml(s.name)} · ${formatMoney(s.amount)}">
+      <span class="sc-name">${escapeHtml(s.name)}</span><span class="sc-amt">${shortMoney(s.amount)}</span></button>`)
+    .join('');
+}
+
+function pickShortcut(name) {
+  state.shortcutPicked = name;
+  for (const b of els.shortcuts.querySelectorAll('[data-shortcut]')) b.setAttribute('aria-pressed', String(b.dataset.shortcut === name));
 }
 
 els.steps.forEach((button) =>
@@ -255,9 +263,18 @@ els.categories.addEventListener('click', (ev) => {
   selectCategory(button.dataset.cat === state.category ? '' : button.dataset.cat);
 });
 
-els.shortcut.addEventListener('change', () => {
-  const s = state.shortcuts.find((x) => x.name === els.shortcut.value);
+els.shortcuts.addEventListener('click', (ev) => {
+  const chip = ev.target.closest('[data-shortcut]');
+  const s = chip && state.shortcuts.find((x) => x.name === chip.dataset.shortcut);
   if (!s) return;
+  if (state.shortcutPicked === s.name) {
+    // Tapped again: un-pick it, and take back what it filled in unless that was changed since.
+    pickShortcut('');
+    if (parseAmount(els.amount.value) === s.amount) setAmount(0);
+    if (s.category && sameName(state.category, s.category)) selectCategory('');
+    return;
+  }
+  pickShortcut(s.name);
   setAmount(s.amount);
   if (s.category) selectCategory(s.category);
   setToday(); // same as the sheet: a shortcut also sets the date to today

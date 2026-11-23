@@ -2,7 +2,7 @@
 
 An expense tracker you install on your phone's home screen. It works offline and syncs to your **Accountant At Home** Google Sheet.
 
-- Log a spend in a few taps: **+1 / +5 / +10 / +50 / +100** buttons (turn on **− Subtract** to take away instead), a shortcut dropdown and a sideways-scrolling row of categories.
+- Log a spend in a few taps: **+1 / +5 / +10 / +50 / +100** buttons (turn on **− Subtract** to take away instead), sideways-scrolling rows of categories and shortcuts (each shortcut shows its amount).
 - **☰ menu** (top left): add, rename, delete or reorder (drag ≡) shortcuts and categories. Pick a category's colour in its edit form (swatches, or 🌈 for any colour). Colours are saved in the sheet's **Categories** tab, **column B** (the cell is filled with the colour); you can also type a colour code such as `#f97316` there. Changes show at once and reach the sheet's Shortcut / Categories tabs on the next sync. Renaming a category also renames it on past entries; deleting one keeps past entries as they are.
 - Month view: total, average per day, spending by category, and entries grouped by day in the Thai day colours. Tap an entry to see it, edit it (amount, category, date, note) or delete it. Changes show at once and reach the sheet on the next sync: an edit updates the row in place, or moves it to another month's tab if the date changed; a deletion removes only that row's cells.
 - The sync badge (top right) only appears when something needs your attention: changes waiting, offline with changes, a failed sync, or not connected. Settings → Status always shows the details.

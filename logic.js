@@ -105,6 +105,9 @@ export function parseAmount(text) {
 export const formatMoney = (n) =>
   '฿' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** Short form for chips: ฿17, ฿1,250, ฿12.5 (no ".00"). */
+export const shortMoney = (n) => '฿' + n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
 /** 'Hobbies (Board games, …)' → 'Hobbies' for chips and lists. */
 export const shortName = (category) => category.replace(/\s*\(.*\)\s*$/, '') || category;
 

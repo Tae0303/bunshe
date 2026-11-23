@@ -55,10 +55,9 @@
         </div>
 
         <div class="card" id="shortcutsField">
-          <label for="shortcut" class="label">Shortcut</label>
-          <div class="select">
-            <select id="shortcut" disabled><option value="">No shortcuts yet · add one from ☰</option></select>
-          </div>
+          <span class="label" id="shortcutLabel">Shortcuts</span>
+          <div id="shortcuts" class="chips scroll" role="group" aria-labelledby="shortcutLabel" hidden></div>
+          <p id="shortcutsEmpty" class="shortcuts-empty">No shortcuts yet · add one from ☰</p>
         </div>
 
         <div class="card">

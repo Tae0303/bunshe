@@ -2,8 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   monthLabel, daysInMonth, shiftMonth, daysCounted, summarize, parseAmount, round2, shortName, toCsv, weekdayIndex,
-  applyListOps, hasName, stepAmount, sortByOrder, moveTo,
+  applyListOps, hasName, stepAmount, sortByOrder, moveTo, shortMoney,
 } from '../logic.js';
+
+test('short amounts on shortcut chips', () => {
+  assert.equal(shortMoney(17), '฿17');
+  assert.equal(shortMoney(1250), '฿1,250');
+  assert.equal(shortMoney(12.5), '฿12.5');
+  assert.equal(shortMoney(99.99), '฿99.99');
+});
 
 test('category colours: set, follow a rename, keep the target colour on a merge, go on delete', () => {
   const sheet = { categories: ['Food', 'Transit', 'Others'], shortcuts: [], colors: { Food: '#f97316', ' transit ': '#3b82f6' } };
