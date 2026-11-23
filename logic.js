@@ -14,10 +14,9 @@ export const DEFAULT_CATEGORIES = [
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Thai day colours, the same ones the sheet uses to colour its date cells.
-// Sunday and Thursday are a touch more saturated than the sheet's, which looked washed out.
-export const DAY_COLORS = ['#f7bcbc', '#fff2cc', '#f3c4e7', '#d9ead3', '#fdd6ae', '#cfe2f3', '#d9d2e9'];
-// The same Thai day colours, strong enough to read as a small dot (Sun red … Sat purple).
-export const DAY_DOTS = ['#ef4444', '#facc15', '#ec4899', '#22c55e', '#f97316', '#3b82f6', '#a855f7'];
+// Pastel, a little richer than the sheet's so they still show as a small dot. Sunday (pastel red)
+// and Thursday (pastel orange) are kept clearly apart, and Sunday apart from Tuesday's pink.
+export const DAY_COLORS = ['#fca5a5', '#fde68a', '#fbcfe8', '#bbf7d0', '#fdba74', '#bfdbfe', '#ddd6fe'];
 export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;

@@ -1,12 +1,12 @@
 import * as db from './db.js';
 import { syncNow, onStatus } from './sync.js';
 import {
-  DEFAULT_CATEGORIES, WEEKDAYS, WEEKDAY_NAMES, DAY_COLORS, DAY_DOTS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
+  DEFAULT_CATEGORIES, WEEKDAYS, WEEKDAY_NAMES, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
   applyListOps, hasName, sameName, stepAmount, moveTo, nameKey,
 } from './logic.js';
 
-const APP_VERSION = '1.7.2';
+const APP_VERSION = '1.7.3';
 const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -165,13 +165,13 @@ function setToday() {
   paintDayDot(els.dateDot, els.date.value);
 }
 
-/** The dot inside a date field, in the Thai colour of that day (Sun red … Sat purple). */
+/** The dot inside a date field, in the pastel Thai colour of that day (Sun red … Sat purple). */
 function paintDayDot(dot, iso) {
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(iso);
   dot.hidden = !valid;
   if (!valid) return;
   const w = weekdayIndex(iso);
-  dot.style.background = DAY_DOTS[w];
+  dot.style.background = DAY_COLORS[w];
   dot.title = WEEKDAY_NAMES[w];
 }
 
