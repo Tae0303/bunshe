@@ -2,8 +2,29 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   monthLabel, daysInMonth, shiftMonth, daysCounted, summarize, parseAmount, round2, shortName, toCsv, weekdayIndex,
-  applyListOps, hasName, stepAmount,
+  applyListOps, hasName, stepAmount, sortByOrder, moveItem,
 } from '../logic.js';
+
+test('reorder: move up/down, nothing past either end', () => {
+  assert.deepEqual(moveItem(['a', 'b', 'c'], 0, 1), ['b', 'a', 'c']);
+  assert.deepEqual(moveItem(['a', 'b', 'c'], 2, -1), ['a', 'c', 'b']);
+  assert.equal(moveItem(['a', 'b', 'c'], 0, -1), null);
+  assert.equal(moveItem(['a', 'b', 'c'], 2, 1), null);
+});
+
+test('reorder: names in the order come first; ones added in the sheet meanwhile keep their place after', () => {
+  assert.deepEqual(sortByOrder(['Food', 'Transit', 'New one', 'Others'], ['transit', 'Others', 'Food']), ['Transit', 'Others', 'Food', 'New one']);
+  const r = applyListOps(
+    { categories: ['Food & Drinks', 'Transit', 'Others'], shortcuts: [{ name: 'A' }, { name: 'B' }, { name: 'C' }] },
+    [
+      { type: 'reorderCategories', order: ['Transit', 'Food & Drinks', 'Others'] },
+      { type: 'reorderShortcuts', order: ['C', 'A', 'B'] },
+      { type: 'renameCategory', from: 'Transit', to: 'Travel' },
+    ],
+  );
+  assert.deepEqual(r.categories, ['Travel', 'Food & Drinks', 'Others']);
+  assert.deepEqual(r.shortcuts.map((s) => s.name), ['C', 'A', 'B']);
+});
 
 test('step buttons: add, subtract, never below 0, exact decimals', () => {
   assert.equal([100, 50, 10, 5, 1].reduce((sum, s) => stepAmount(sum, s), 0), 166);

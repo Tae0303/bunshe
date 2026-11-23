@@ -3,11 +3,12 @@ import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
-  applyListOps, hasName, sameName, stepAmount,
+  applyListOps, hasName, sameName, stepAmount, moveItem,
 } from './logic.js';
 
-const APP_VERSION = '1.5.2';
-const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
+const APP_VERSION = '1.6.0';
+const UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+const DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#06b6d4', '#a16207', '#84cc16', '#d946ef'];
@@ -59,15 +60,35 @@ const state = {
   editConnection: false, // "Change connection" tapped: show the URL/key form again
   editing: null, // the shortcut or category name being edited, or null when adding
   returnToList: null, // 'shortcut' | 'category': reopen that list when the edit form closes
+  colorMap: {}, // category (lower case) → palette index, so colours survive reordering and renaming
 };
 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+/*
+ * Each category keeps its colour, whatever its place in the list: the first time the app sees a
+ * category it gets the first free colour, remembered on this phone. "Others" is always slate.
+ */
+const colorKey = (name) => String(name).trim().toLowerCase();
 const colorOf = (category) => {
-  if (category === 'Others') return OTHER_COLOR;
-  const i = state.categories.filter((c) => c !== 'Others').indexOf(category);
-  return i >= 0 ? PALETTE[i % PALETTE.length] : OTHER_COLOR;
+  if (!category || category === 'Others') return OTHER_COLOR;
+  const i = state.colorMap[colorKey(category)];
+  return i === undefined ? OTHER_COLOR : PALETTE[i % PALETTE.length];
 };
+function assignColors() {
+  const used = new Set(Object.values(state.colorMap));
+  let changed = false;
+  for (const c of state.categories) {
+    if (c === 'Others' || state.colorMap[colorKey(c)] !== undefined) continue;
+    let i = 0;
+    while (used.has(i) && i < PALETTE.length) i++;
+    if (i === PALETTE.length) i = used.size % PALETTE.length; // more categories than colours: start reusing
+    state.colorMap[colorKey(c)] = i;
+    used.add(i);
+    changed = true;
+  }
+  if (changed) db.set('categoryColors', state.colorMap);
+}
 // Waiting to sync: new entries, deleted entries, and category/shortcut changes.
 const pendingCount = () => state.expenses.filter((e) => e.status !== 'synced').length + state.queuedLists;
 // What the app shows: everything except entries deleted here (they wait only to be deleted in the sheet).
@@ -554,17 +575,48 @@ function openList(kind) {
   els.listTitle.textContent = isShortcut ? 'Shortcuts' : 'Categories';
   els.listAdd.textContent = isShortcut ? 'Add shortcut' : 'Add category';
   const items = isShortcut ? state.shortcuts : state.categories;
+  const last = items.length - 1;
+  // Each row: the item (tap to rename / delete) and ▲ ▼ to move it.
+  const row = (i, name, dot, sub) => `<li class="reorder-row">
+      <button type="button" class="row-main" data-index="${i}"><span class="dot" style="background:${dot}"></span>
+        <span class="what"><span>${escapeHtml(name)}</span>${sub ? `<small>${sub}</small>` : ''}</span></button>
+      <span class="move">
+        <button type="button" class="move-btn" data-move="-1" data-index="${i}" aria-label="Move ${escapeHtml(name)} up" ${i === 0 ? 'disabled' : ''}>${UP}</button>
+        <button type="button" class="move-btn" data-move="1" data-index="${i}" aria-label="Move ${escapeHtml(name)} down" ${i === last ? 'disabled' : ''}>${DOWN}</button>
+      </span></li>`;
   els.listItems.innerHTML = items.length
     ? items.map((item, i) => isShortcut
-      ? `<li><button type="button" data-index="${i}"><span class="dot" style="background:${colorOf(item.category)}"></span>
-          <span class="what"><span>${escapeHtml(item.name)}</span><small>${formatMoney(item.amount)} · ${escapeHtml(shortName(item.category || '—'))}</small></span>${CHEVRON}</button></li>`
-      : `<li><button type="button" data-index="${i}"><span class="dot" style="background:${colorOf(item)}"></span>
-          <span class="what"><span>${escapeHtml(item)}</span></span>${CHEVRON}</button></li>`).join('')
+      ? row(i, item.name, colorOf(item.category), `${formatMoney(item.amount)} · ${escapeHtml(shortName(item.category || '—'))}`)
+      : row(i, item, colorOf(item))).join('')
     : `<li class="empty">No ${isShortcut ? 'shortcuts' : 'categories'} yet.</li>`;
   if (!els.listDialog.open) els.listDialog.showModal();
 }
 
+/** ▲ / ▼: the new order shows at once; quick taps in a row reach the sheet as one change. */
+async function moveInList(kind, index, delta) {
+  const names = kind === 'shortcut' ? state.shortcuts.map((s) => s.name) : state.categories;
+  const order = moveItem(names, index, delta);
+  if (!order) return;
+  const type = kind === 'shortcut' ? 'reorderShortcuts' : 'reorderCategories';
+  // The newest full order replaces any older one still waiting.
+  const queue = ((await db.get('pendingLists')) || []).filter((op) => op.type !== type);
+  queue.push({ id: newId(), type, order });
+  await db.set('pendingLists', queue);
+  await reloadData();
+  openList(kind);
+  // Keep the finger on the same arrow of the moved item, so it can keep moving.
+  els.listItems.querySelector(`[data-move="${delta}"][data-index="${index + delta}"]:not(:disabled)`)?.focus();
+  clearTimeout(reorderTimer);
+  reorderTimer = setTimeout(syncNow, 1500);
+}
+let reorderTimer;
+
 els.listItems.addEventListener('click', (ev) => {
+  const move = ev.target.closest('[data-move]');
+  if (move) {
+    moveInList(els.listDialog.dataset.kind, Number(move.dataset.index), Number(move.dataset.move));
+    return;
+  }
   const button = ev.target.closest('[data-index]');
   if (!button) return;
   const kind = els.listDialog.dataset.kind;
@@ -674,6 +726,12 @@ els.categoryForm.addEventListener('submit', async (ev) => {
   }
   if (name !== original) {
     const wasPicked = sameName(state.category, original);
+    // The colour goes with the category.
+    if (state.colorMap[colorKey(original)] !== undefined) {
+      state.colorMap[colorKey(name)] = state.colorMap[colorKey(original)];
+      delete state.colorMap[colorKey(original)];
+      await db.set('categoryColors', state.colorMap);
+    }
     await db.renameCategory(original, name); // entries on this phone follow the new name
     await queueListItem({ type: 'renameCategory', from: original, to: name });
     if (wasPicked) selectCategory(name);
@@ -697,9 +755,11 @@ els.categoryForm.addEventListener('input', () => dialogError(els.catError, ''));
 /* ---------- Data + lifecycle ---------- */
 
 async function reloadData() {
-  const [expenses, categories, shortcuts, lastSync, queue, settings] = await Promise.all([
+  const [expenses, categories, shortcuts, lastSync, queue, settings, colors] = await Promise.all([
     db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'), db.get('pendingLists'), db.get('settings'),
+    db.get('categoryColors'),
   ]);
+  state.colorMap = colors || {};
   state.hasSettings = !!(settings?.url && settings?.key);
   const queued = queue || [];
   const lists = applyListOps({ categories: categories?.length ? categories : DEFAULT_CATEGORIES, shortcuts: shortcuts || [] }, queued);
@@ -708,6 +768,7 @@ async function reloadData() {
   state.shortcuts = lists.shortcuts;
   state.queuedLists = queued.length;
   state.lastSync = lastSync || null;
+  assignColors();
   renderCategories();
   renderShortcuts();
   renderMonth();
@@ -721,6 +782,8 @@ onStatus(async (status) => {
   if (status.state === 'syncing') return renderBadge();
   state.syncRequested = false;
   await reloadData();
+  // Something changed while that sync was running: send it now rather than at the next minute.
+  if (status.state === 'ok' && pendingCount()) setTimeout(syncNow, 300);
 });
 
 // No zoom. Safari on iPhone can ignore user-scalable=no, so also cancel its pinch gestures.

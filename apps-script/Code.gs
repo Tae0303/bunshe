@@ -2,8 +2,8 @@
  * Accountant At Home: the Home-tab script plus a sync API for the Bunshe app.
  *
  * Paste this over the old Code.gs. Everything the Home tab did still works, and:
- *   - doPost() lets the app add, edit and delete entries, add / rename / delete categories and
- *     shortcuts, and read the sheet back
+ *   - doPost() lets the app add, edit and delete entries, add / rename / delete / reorder
+ *     categories and shortcuts, and read the sheet back
  *   - fixes spec issues #1 (monthly trigger made "[object Object]"),
  *     #3 (clearing the Shortcut cell threw an error) and #6 (two time zones)
  * Setup steps: README.md in the app's repository.
@@ -262,8 +262,47 @@ function applyListOp_(op) {
     case 'shortcut': return putShortcut_(op.name, op);
     case 'updateShortcut': return putShortcut_(op.from, op);
     case 'deleteShortcut': return deleteShortcut_(op.name);
+    case 'reorderCategories': return reorderCategories_(op.order || []);
+    case 'reorderShortcuts': return reorderShortcuts_(op.order || []);
     default: throw new Error('Unknown change: ' + (op && op.type));
   }
+}
+
+/** Same as sortByOrder in the app's logic.js: names in `order` first, the rest after in their old order. */
+function sortByOrder_(items, order, nameOf) {
+  const rank = (item) => {
+    const i = order.findIndex((o) => sameName_(o, nameOf(item)));
+    return i < 0 ? order.length : i;
+  };
+  return items
+    .map((item, i) => ({ item: item, i: i }))
+    .sort((a, b) => rank(a.item) - rank(b.item) || a.i - b.i)
+    .map((x) => x.item);
+}
+
+/** New category order. Names move between the cells that hold names, so blank rows stay blank. */
+function reorderCategories_(order) {
+  const c = categoryCells_();
+  const filled = [];
+  c.values.forEach(([v], i) => { if (v !== '') filled.push(i); });
+  if (filled.length < 2) return;
+  const sorted = sortByOrder_(filled.map((i) => c.values[i][0]), order, (v) => v);
+  filled.forEach((i, k) => { c.values[i][0] = sorted[k]; });
+  const span = filled[filled.length - 1] + 1;
+  c.sheet.getRange(2, 1, span, 1).setValues(c.values.slice(0, span));
+}
+
+/** New shortcut order. Whole rows (name, amount, category) move; the "-" reset row and blank rows stay put. */
+function reorderShortcuts_(order) {
+  const sheet = tab_('Shortcut');
+  const last = sheet.getLastRow();
+  if (last < 3) return;
+  const rows = sheet.getRange(2, 1, last - 1, 3).getValues();
+  const movable = [];
+  rows.forEach((r, i) => { if (r[0] !== '' && r[0] !== '-') movable.push(i); });
+  const sorted = sortByOrder_(movable.map((i) => rows[i]), order, (r) => r[0]);
+  movable.forEach((i, k) => { rows[i] = sorted[k]; });
+  sheet.getRange(2, 1, rows.length, 3).setValues(rows);
 }
 
 function tab_(name) {

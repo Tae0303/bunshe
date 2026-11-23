@@ -119,6 +119,8 @@ export const hasName = (names, name) => names.some((n) => sameName(n, name));
  *   { type: 'shortcut', name, amount, category }        add (or replace one with that name)
  *   { type: 'updateShortcut', from, name, amount, category }
  *   { type: 'deleteShortcut', name }
+ *   { type: 'reorderCategories', order: [names] }      the full new order
+ *   { type: 'reorderShortcuts', order: [names] }
  */
 export function applyListOps(fromSheet, queue) {
   let categories = [...fromSheet.categories];
@@ -155,9 +157,39 @@ export function applyListOps(fromSheet, queue) {
       case 'deleteShortcut':
         shortcuts = shortcuts.filter((s) => !sameName(s.name, op.name));
         break;
+      case 'reorderCategories':
+        categories = sortByOrder(categories, op.order);
+        break;
+      case 'reorderShortcuts':
+        shortcuts = sortByOrder(shortcuts, op.order, (s) => s.name);
+        break;
     }
   }
   return { categories, shortcuts };
+}
+
+/**
+ * Puts items in the order of `order` (matched by name). Items not in `order` (added in the sheet
+ * meanwhile) keep their relative order after them. Code.gs sortByOrder_ does the same.
+ */
+export function sortByOrder(items, order, nameOf = (x) => x) {
+  const rank = (item) => {
+    const i = order.findIndex((o) => sameName(o, nameOf(item)));
+    return i < 0 ? order.length : i;
+  };
+  return items
+    .map((item, i) => ({ item, i }))
+    .sort((a, b) => rank(a.item) - rank(b.item) || a.i - b.i)
+    .map((x) => x.item);
+}
+
+/** Swaps an item with its neighbour (delta −1 = up, +1 = down). Returns the new array, or null at an end. */
+export function moveItem(items, index, delta) {
+  const j = index + delta;
+  if (index < 0 || index >= items.length || j < 0 || j >= items.length) return null;
+  const out = [...items];
+  [out[index], out[j]] = [out[j], out[index]];
+  return out;
 }
 
 export function toCsv(expenses) {
