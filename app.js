@@ -6,7 +6,7 @@ import {
   applyListOps, hasName, sameName, stepAmount,
 } from './logic.js';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -19,7 +19,7 @@ const els = {
   title: $('#title'), badge: $('#syncBadge'), toast: $('#toast'), version: $('#version'),
   form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
   stepsGroup: $('#steps'), minusMode: $('#minusMode'),
-  shortcut: $('#shortcut'), shortcutsEmpty: $('#shortcutsEmpty'), categories: $('#categories'),
+  shortcut: $('#shortcut'), categories: $('#categories'),
   date: $('#date'), today: $('#today'), note: $('#note'), error: $('#formError'),
   monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
   total: $('#mTotal'), count: $('#mCount'), avg: $('#mAvg'), days: $('#mDays'),
@@ -164,10 +164,9 @@ function renderCategories() {
 function renderShortcuts() {
   const none = state.shortcuts.length === 0;
   const picked = els.shortcut.value;
-  els.shortcutsEmpty.hidden = !none;
   els.shortcut.disabled = none;
   els.shortcut.innerHTML =
-    `<option value="">${none ? 'No shortcuts yet' : 'Choose a shortcut…'}</option>` +
+    `<option value="">${none ? 'No shortcuts yet · add one from ☰' : 'Choose a shortcut…'}</option>` +
     state.shortcuts.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)} · ${formatMoney(s.amount)}</option>`).join('');
   if (state.shortcuts.some((s) => s.name === picked)) els.shortcut.value = picked; // a sync mid-entry keeps the pick
 }
