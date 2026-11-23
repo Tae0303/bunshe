@@ -6,7 +6,7 @@ import {
   mergeCategories, mergeShortcuts, hasName,
 } from './logic.js';
 
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.1.2';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#06b6d4', '#a16207', '#84cc16', '#d946ef'];
@@ -451,6 +451,14 @@ onStatus(async (status) => {
   if (status.state === 'syncing') renderBadge();
   else await reloadData();
 });
+
+// No zoom. Safari on iPhone can ignore user-scalable=no, so also cancel its pinch gestures.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (ev) => ev.preventDefault(), { passive: false });
+}
+document.addEventListener('touchmove', (ev) => {
+  if (ev.touches.length > 1) ev.preventDefault(); // two fingers = pinch
+}, { passive: false });
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
