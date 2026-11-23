@@ -3,12 +3,11 @@ import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
-  applyListOps, hasName, sameName, stepAmount, moveItem,
+  applyListOps, hasName, sameName, stepAmount, moveTo,
 } from './logic.js';
 
-const APP_VERSION = '1.6.0';
-const UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
-const DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+const APP_VERSION = '1.6.1';
+const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#06b6d4', '#a16207', '#84cc16', '#d946ef'];
@@ -575,15 +574,11 @@ function openList(kind) {
   els.listTitle.textContent = isShortcut ? 'Shortcuts' : 'Categories';
   els.listAdd.textContent = isShortcut ? 'Add shortcut' : 'Add category';
   const items = isShortcut ? state.shortcuts : state.categories;
-  const last = items.length - 1;
-  // Each row: the item (tap to rename / delete) and ▲ ▼ to move it.
+  // Each row: the item (tap to rename / delete) and a ≡ grip to drag it to a new place.
   const row = (i, name, dot, sub) => `<li class="reorder-row">
       <button type="button" class="row-main" data-index="${i}"><span class="dot" style="background:${dot}"></span>
         <span class="what"><span>${escapeHtml(name)}</span>${sub ? `<small>${sub}</small>` : ''}</span></button>
-      <span class="move">
-        <button type="button" class="move-btn" data-move="-1" data-index="${i}" aria-label="Move ${escapeHtml(name)} up" ${i === 0 ? 'disabled' : ''}>${UP}</button>
-        <button type="button" class="move-btn" data-move="1" data-index="${i}" aria-label="Move ${escapeHtml(name)} down" ${i === last ? 'disabled' : ''}>${DOWN}</button>
-      </span></li>`;
+      <button type="button" class="grip" data-grip="${i}" aria-label="Move ${escapeHtml(name)}: drag, or use the up and down arrow keys">${GRIP}</button></li>`;
   els.listItems.innerHTML = items.length
     ? items.map((item, i) => isShortcut
       ? row(i, item.name, colorOf(item.category), `${formatMoney(item.amount)} · ${escapeHtml(shortName(item.category || '—'))}`)
@@ -592,10 +587,10 @@ function openList(kind) {
   if (!els.listDialog.open) els.listDialog.showModal();
 }
 
-/** ▲ / ▼: the new order shows at once; quick taps in a row reach the sheet as one change. */
-async function moveInList(kind, index, delta) {
+/** Moves an item from one place to another: shows at once; moves close together reach the sheet as one change. */
+async function reorderList(kind, from, to) {
   const names = kind === 'shortcut' ? state.shortcuts.map((s) => s.name) : state.categories;
-  const order = moveItem(names, index, delta);
+  const order = moveTo(names, from, to);
   if (!order) return;
   const type = kind === 'shortcut' ? 'reorderShortcuts' : 'reorderCategories';
   // The newest full order replaces any older one still waiting.
@@ -604,19 +599,104 @@ async function moveInList(kind, index, delta) {
   await db.set('pendingLists', queue);
   await reloadData();
   openList(kind);
-  // Keep the finger on the same arrow of the moved item, so it can keep moving.
-  els.listItems.querySelector(`[data-move="${delta}"][data-index="${index + delta}"]:not(:disabled)`)?.focus();
+  els.listItems.querySelector(`[data-grip="${to}"]`)?.focus({ preventScroll: true });
   clearTimeout(reorderTimer);
   reorderTimer = setTimeout(syncNow, 1500);
 }
 let reorderTimer;
 
-els.listItems.addEventListener('click', (ev) => {
-  const move = ev.target.closest('[data-move]');
-  if (move) {
-    moveInList(els.listDialog.dataset.kind, Number(move.dataset.index), Number(move.dataset.move));
-    return;
+/*
+ * Drag to reorder, built on pointer events: the browser's own drag-and-drop does not work with
+ * touch on iPhone. Press the ≡ grip and move: the row follows the finger, the others slide out
+ * of the way, and the list scrolls when the finger nears its top or bottom edge.
+ */
+let drag = null;
+
+els.listItems.addEventListener('pointerdown', (ev) => {
+  const grip = ev.target.closest('[data-grip]');
+  if (!grip || drag || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+  ev.preventDefault();
+  const list = els.listItems;
+  const rows = [...list.querySelectorAll('.reorder-row')];
+  const from = Number(grip.dataset.grip);
+  const top = list.getBoundingClientRect().top;
+  // Row centres in list-content coordinates, so scrolling the list does not throw them off.
+  const centers = rows.map((r) => {
+    const b = r.getBoundingClientRect();
+    return b.top - top + list.scrollTop + b.height / 2;
+  });
+  grip.setPointerCapture(ev.pointerId);
+  rows[from].classList.add('dragging');
+  rows.forEach((r, k) => k !== from && r.classList.add('shifting'));
+  drag = {
+    kind: els.listDialog.dataset.kind, pointerId: ev.pointerId, rows, from, to: from, centers,
+    height: rows[from].getBoundingClientRect().height, startY: ev.clientY, lastY: ev.clientY,
+    startScroll: list.scrollTop, speed: 0, raf: 0,
+  };
+});
+
+function followFinger() {
+  const d = drag;
+  const list = els.listItems;
+  const dy = d.lastY - d.startY + (list.scrollTop - d.startScroll);
+  const min = d.centers[0] - d.centers[d.from] - d.height / 2;
+  const max = d.centers.at(-1) - d.centers[d.from] + d.height / 2;
+  const y = Math.max(min, Math.min(max, dy));
+  d.rows[d.from].style.transform = `translateY(${y}px)`;
+  const center = d.centers[d.from] + y;
+  d.to = d.centers.filter((c, k) => k !== d.from && c < center).length; // the place it would land
+  d.rows.forEach((r, k) => {
+    if (k === d.from) return;
+    const shift = d.from < d.to && k > d.from && k <= d.to ? -d.height : d.from > d.to && k >= d.to && k < d.from ? d.height : 0;
+    r.style.transform = shift ? `translateY(${shift}px)` : '';
+  });
+  // Near the top or bottom edge of the list: keep scrolling while the finger stays there.
+  const box = list.getBoundingClientRect();
+  d.speed = d.lastY < box.top + 36 ? -8 : d.lastY > box.bottom - 36 ? 8 : 0;
+  if (d.speed && !d.raf) {
+    const tick = () => {
+      if (!drag || !drag.speed) {
+        if (drag) drag.raf = 0;
+        return;
+      }
+      list.scrollTop += drag.speed;
+      followFinger();
+      drag.raf = requestAnimationFrame(tick);
+    };
+    d.raf = requestAnimationFrame(tick);
   }
+}
+
+els.listItems.addEventListener('pointermove', (ev) => {
+  if (!drag || ev.pointerId !== drag.pointerId) return;
+  drag.lastY = ev.clientY;
+  followFinger();
+});
+
+function endDrag(ev) {
+  if (!drag || ev.pointerId !== drag.pointerId) return;
+  const { kind, from, to, rows, raf } = drag;
+  cancelAnimationFrame(raf);
+  drag = null;
+  rows.forEach((r) => {
+    r.style.transform = '';
+    r.classList.remove('dragging', 'shifting');
+  });
+  if (to !== from) reorderList(kind, from, to);
+}
+els.listItems.addEventListener('pointerup', endDrag);
+els.listItems.addEventListener('pointercancel', endDrag);
+
+// Keyboard: with the grip focused, the up / down arrow keys move the item one place.
+els.listItems.addEventListener('keydown', (ev) => {
+  const grip = ev.target.closest('[data-grip]');
+  if (!grip || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+  ev.preventDefault();
+  const i = Number(grip.dataset.grip);
+  reorderList(els.listDialog.dataset.kind, i, i + (ev.key === 'ArrowUp' ? -1 : 1));
+});
+
+els.listItems.addEventListener('click', (ev) => {
   const button = ev.target.closest('[data-index]');
   if (!button) return;
   const kind = els.listDialog.dataset.kind;

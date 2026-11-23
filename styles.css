@@ -452,22 +452,29 @@ dialog::backdrop { background: rgb(0 0 0 / 0.4); }
 .manage-list .what > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manage-list small { color: var(--muted); font-size: 13px; }
 .manage-list .empty { padding: 16px 8px; }
-/* List rows: the item (tap to edit) + ▲ ▼ to move it */
-.reorder-row { display: flex; align-items: center; gap: 4px; padding-right: 10px; } /* clear of the list's scrollbar */
+/* List rows: the item (tap to edit) + a ≡ grip to drag it */
+.reorder-row { position: relative; display: flex; align-items: center; padding-right: 6px; background: var(--card); }
 .manage-list .reorder-row .row-main { flex: 1; min-width: 0; }
-.move { display: flex; flex: none; gap: 4px; }
-.manage-list .move-btn {
+.manage-list .grip {
   display: grid;
   place-items: center;
-  width: 40px;
-  min-height: 40px;
+  flex: none;
+  width: 44px;
+  min-height: 44px;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none; /* a finger on the grip drags the row instead of scrolling the list */
 }
-.manage-list .move-btn:disabled { opacity: 0.3; cursor: default; }
-.move-btn svg { width: 20px; height: 20px; fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.grip svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.reorder-row.shifting { transition: transform 150ms ease; }
+.reorder-row.dragging {
+  z-index: 2;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
+  cursor: grabbing;
+}
+.reorder-row.dragging .grip { color: var(--accent); }
 .modal-actions .primary, .modal-actions .secondary { height: 48px; margin: 0; font-size: 16px; }
 
 /* ---------- Tab bar + toast ---------- */

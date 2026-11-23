@@ -183,12 +183,12 @@ export function sortByOrder(items, order, nameOf = (x) => x) {
     .map((x) => x.item);
 }
 
-/** Swaps an item with its neighbour (delta −1 = up, +1 = down). Returns the new array, or null at an end. */
-export function moveItem(items, index, delta) {
-  const j = index + delta;
-  if (index < 0 || index >= items.length || j < 0 || j >= items.length) return null;
+/** Takes the item at `from` and puts it at `to` (drag and drop). Returns the new array, or null if nothing moves. */
+export function moveTo(items, from, to) {
+  if (from === to || from < 0 || from >= items.length || to < 0 || to >= items.length) return null;
   const out = [...items];
-  [out[index], out[j]] = [out[j], out[index]];
+  const [item] = out.splice(from, 1);
+  out.splice(to, 0, item);
   return out;
 }
 

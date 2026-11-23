@@ -2,14 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   monthLabel, daysInMonth, shiftMonth, daysCounted, summarize, parseAmount, round2, shortName, toCsv, weekdayIndex,
-  applyListOps, hasName, stepAmount, sortByOrder, moveItem,
+  applyListOps, hasName, stepAmount, sortByOrder, moveTo,
 } from '../logic.js';
 
-test('reorder: move up/down, nothing past either end', () => {
-  assert.deepEqual(moveItem(['a', 'b', 'c'], 0, 1), ['b', 'a', 'c']);
-  assert.deepEqual(moveItem(['a', 'b', 'c'], 2, -1), ['a', 'c', 'b']);
-  assert.equal(moveItem(['a', 'b', 'c'], 0, -1), null);
-  assert.equal(moveItem(['a', 'b', 'c'], 2, 1), null);
+test('drag reorder: take an item from one place and drop it at another', () => {
+  assert.deepEqual(moveTo(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd']);
+  assert.deepEqual(moveTo(['a', 'b', 'c', 'd'], 3, 1), ['a', 'd', 'b', 'c']);
+  assert.equal(moveTo(['a', 'b', 'c'], 1, 1), null); // dropped where it was
+  assert.equal(moveTo(['a', 'b', 'c'], 0, -1), null); // past the top
+  assert.equal(moveTo(['a', 'b', 'c'], 2, 3), null); // past the bottom
 });
 
 test('reorder: names in the order come first; ones added in the sheet meanwhile keep their place after', () => {
