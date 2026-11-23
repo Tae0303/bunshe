@@ -3,25 +3,31 @@ import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
+  mergeCategories, mergeShortcuts, hasName,
 } from './logic.js';
 
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.1.0';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
-const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#64748b'];
-const OTHER_COLOR = '#94a3b8';
+// "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
+const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#06b6d4', '#a16207', '#84cc16', '#d946ef'];
+const OTHER_COLOR = '#64748b';
 const TITLES = { add: 'Add expense', month: 'Month', settings: 'Settings' };
 
 const $ = (selector) => document.querySelector(selector);
 const els = {
   title: $('#title'), badge: $('#syncBadge'), toast: $('#toast'), version: $('#version'),
   form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
-  shortcuts: $('#shortcuts'), shortcutsEmpty: $('#shortcutsEmpty'), categories: $('#categories'),
+  shortcut: $('#shortcut'), shortcutsEmpty: $('#shortcutsEmpty'), categories: $('#categories'),
   date: $('#date'), today: $('#today'), note: $('#note'), error: $('#formError'),
   monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
   total: $('#mTotal'), count: $('#mCount'), avg: $('#mAvg'), days: $('#mDays'),
   donut: $('#donut'), catTable: $('#catTable'), entries: $('#entries'),
   settingsForm: $('#settingsForm'), syncUrl: $('#syncUrl'), syncKey: $('#syncKey'),
   syncInfo: $('#syncInfo'), syncNowBtn: $('#syncNow'), exportBtn: $('#exportCsv'),
+  menuBtn: $('#menuBtn'), menu: $('#menu'),
+  shortcutDialog: $('#shortcutDialog'), shortcutForm: $('#shortcutForm'),
+  scName: $('#scName'), scAmount: $('#scAmount'), scCategory: $('#scCategory'), scError: $('#scError'),
+  categoryDialog: $('#categoryDialog'), categoryForm: $('#categoryForm'), catName: $('#catName'), catError: $('#catError'),
 };
 
 const state = {
@@ -33,15 +39,17 @@ const state = {
   autoDate: '', // the date the app filled in itself; it moves to the new day if untouched
   sync: { state: 'idle' },
   lastSync: null,
+  queuedLists: 0, // categories/shortcuts added here, not yet in the sheet
 };
 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const colorOf = (category) => {
-  const i = state.categories.indexOf(category);
+  if (category === 'Others') return OTHER_COLOR;
+  const i = state.categories.filter((c) => c !== 'Others').indexOf(category);
   return i >= 0 ? PALETTE[i % PALETTE.length] : OTHER_COLOR;
 };
-const pendingCount = () => state.expenses.filter((e) => e.status === 'pending').length;
+const pendingCount = () => state.expenses.filter((e) => e.status === 'pending').length + state.queuedLists;
 
 function newId() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -108,6 +116,7 @@ function showError(message) {
 function resetForm() {
   setAmount(0);
   selectCategory('');
+  els.shortcut.value = '';
   els.note.value = '';
   setToday();
   showError('');
@@ -122,12 +131,13 @@ function renderCategories() {
 
 function renderShortcuts() {
   const none = state.shortcuts.length === 0;
-  els.shortcuts.hidden = none;
+  const picked = els.shortcut.value;
   els.shortcutsEmpty.hidden = !none;
-  els.shortcuts.innerHTML = state.shortcuts
-    .map((s, i) => `<button type="button" class="chip" data-shortcut="${i}">
-      <span class="dot" style="background:${colorOf(s.category)}"></span>${escapeHtml(s.name)} <b>${formatMoney(s.amount)}</b></button>`)
-    .join('');
+  els.shortcut.disabled = none;
+  els.shortcut.innerHTML =
+    `<option value="">${none ? 'No shortcuts yet' : 'Choose a shortcut…'}</option>` +
+    state.shortcuts.map((s, i) => `<option value="${i}">${escapeHtml(s.name)} · ${formatMoney(s.amount)}</option>`).join('');
+  if (picked !== '' && Number(picked) < state.shortcuts.length) els.shortcut.value = picked; // a sync mid-entry keeps the pick
 }
 
 els.steps.forEach((button) =>
@@ -149,10 +159,10 @@ els.categories.addEventListener('click', (ev) => {
   if (button) selectCategory(button.dataset.cat);
 });
 
-els.shortcuts.addEventListener('click', (ev) => {
-  const button = ev.target.closest('[data-shortcut]');
-  if (!button) return;
-  const s = state.shortcuts[Number(button.dataset.shortcut)];
+els.shortcut.addEventListener('change', () => {
+  if (els.shortcut.value === '') return;
+  const s = state.shortcuts[Number(els.shortcut.value)];
+  if (!s) return;
   setAmount(s.amount);
   if (s.category) selectCategory(s.category);
   setToday(); // same as the sheet: a shortcut also sets the date to today
@@ -327,15 +337,107 @@ els.exportBtn.addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 });
 
+/* ---------- Menu: add shortcut / add category ---------- */
+
+// Tapping the dimmed backdrop or any [data-close] button closes a dialog.
+for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog]) {
+  dialog.addEventListener('click', (ev) => {
+    if (ev.target === dialog || ev.target.closest('[data-close]')) dialog.close();
+  });
+}
+
+els.menuBtn.addEventListener('click', () => els.menu.showModal());
+els.menu.addEventListener('click', (ev) => {
+  const action = ev.target.closest('[data-action]')?.dataset.action;
+  if (!action) return;
+  els.menu.close();
+  if (action === 'add-shortcut') openShortcutDialog();
+  else if (action === 'add-category') openCategoryDialog();
+  else if (action === 'sync') syncNow();
+  else if (action === 'settings') showView('settings');
+});
+
+function dialogError(el, message) {
+  el.textContent = message;
+  el.hidden = !message;
+}
+
+function openShortcutDialog() {
+  // Start from what is on the Add screen, so "type it once, then save it as a shortcut" works.
+  const amount = parseAmount(els.amount.value);
+  els.scName.value = '';
+  els.scAmount.value = amount > 0 ? String(amount) : '';
+  els.scCategory.innerHTML =
+    '<option value="">Choose a category…</option>' +
+    state.categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  els.scCategory.value = state.category;
+  dialogError(els.scError, '');
+  els.shortcutDialog.showModal();
+}
+
+function openCategoryDialog() {
+  els.catName.value = '';
+  dialogError(els.catError, '');
+  els.categoryDialog.showModal();
+}
+
+/** Queues a new category or shortcut for the sheet and shows it right away. */
+async function queueListItem(item) {
+  const queue = (await db.get('pendingLists')) || [];
+  queue.push({ id: newId(), ...item });
+  await db.set('pendingLists', queue);
+  await reloadData();
+  syncNow();
+}
+
+els.shortcutForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const name = els.scName.value.trim();
+  const amount = parseAmount(els.scAmount.value);
+  const category = els.scCategory.value;
+  const problem = !name
+    ? 'Enter a name.'
+    : hasName(state.shortcuts.map((s) => s.name), name)
+      ? `You already have a shortcut called "${name}".`
+      : !(amount > 0)
+        ? 'Enter an amount above 0.'
+        : !category
+          ? 'Pick a category.'
+          : '';
+  if (problem) return dialogError(els.scError, problem);
+  await queueListItem({ type: 'shortcut', name, amount, category });
+  els.shortcutDialog.close();
+  toast(`Shortcut "${name}" added`);
+});
+
+els.categoryForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const name = els.catName.value.trim();
+  const problem = !name
+    ? 'Enter a name.'
+    : hasName(state.categories, name)
+      ? `"${name}" is already a category.`
+      : '';
+  if (problem) return dialogError(els.catError, problem);
+  await queueListItem({ type: 'category', name });
+  els.categoryDialog.close();
+  selectCategory(name); // ready to use straight away
+  toast(`Category "${name}" added`);
+});
+els.shortcutForm.addEventListener('input', () => dialogError(els.scError, ''));
+els.categoryForm.addEventListener('input', () => dialogError(els.catError, ''));
+
 /* ---------- Data + lifecycle ---------- */
 
 async function reloadData() {
-  const [expenses, categories, shortcuts, lastSync] = await Promise.all([
-    db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'),
+  const [expenses, categories, shortcuts, lastSync, queue] = await Promise.all([
+    db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'), db.get('pendingLists'),
   ]);
+  const queued = queue || [];
   state.expenses = expenses;
-  state.categories = categories?.length ? categories : DEFAULT_CATEGORIES;
-  state.shortcuts = shortcuts || [];
+  state.categories = mergeCategories(categories?.length ? categories : DEFAULT_CATEGORIES, queued);
+  state.shortcuts = mergeShortcuts(shortcuts || [], queued);
+  state.queuedLists = queued.length;
   state.lastSync = lastSync || null;
   renderCategories();
   renderShortcuts();

@@ -19,6 +19,9 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="menuBtn" class="icon-only" type="button" aria-label="Menu" aria-haspopup="dialog" aria-controls="menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
     <h1 id="title">Add expense</h1>
     <button id="syncBadge" class="sync" type="button" data-tone="muted">…</button>
   </header>
@@ -42,8 +45,10 @@
         </div>
 
         <div class="card" id="shortcutsField">
-          <span class="label">Shortcuts</span>
-          <div id="shortcuts" class="chips scroll" hidden></div>
+          <label for="shortcut" class="label">Shortcut</label>
+          <div class="select">
+            <select id="shortcut" disabled><option value="">No shortcuts yet</option></select>
+          </div>
           <p id="shortcutsEmpty" class="hint">
             Your shortcuts come from the <b>Shortcut</b> tab in your sheet. They appear here once the app is connected in
             <button type="button" class="link" data-goto="settings">Settings</button> and has synced.
@@ -129,6 +134,71 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings
     </button>
   </nav>
+
+  <dialog id="menu" class="drawer" aria-label="Menu">
+    <div class="drawer-body">
+      <div class="drawer-head">
+        <span class="drawer-title">Bunshe</span>
+        <button type="button" class="icon-only" data-close aria-label="Close menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <nav class="menu-list">
+        <button type="button" data-action="add-shortcut">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg>Add shortcut
+        </button>
+        <button type="button" data-action="add-category">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5V5a1.5 1.5 0 0 1 1.5-1.5h7.5l8 8-9 9z"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>Add category
+        </button>
+        <hr>
+        <button type="button" data-action="sync">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3M18 3v4h-4M6 21v-4h4"/></svg>Sync now
+        </button>
+        <button type="button" data-action="settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings
+        </button>
+      </nav>
+      <p class="drawer-note">New shortcuts and categories are saved on this phone and added to your sheet on the next sync.</p>
+    </div>
+  </dialog>
+
+  <dialog id="shortcutDialog" class="modal" aria-labelledby="shortcutDialogTitle">
+    <form id="shortcutForm" class="modal-body" novalidate autocomplete="off">
+      <h2 id="shortcutDialogTitle" class="section">Add shortcut</h2>
+      <div class="field">
+        <label class="label" for="scName">Name</label>
+        <input id="scName" type="text" maxlength="80" placeholder="e.g. BTS to work" autofocus>
+      </div>
+      <div class="field">
+        <label class="label" for="scAmount">Amount (฿)</label>
+        <input id="scAmount" type="text" inputmode="decimal" placeholder="0">
+      </div>
+      <div class="field">
+        <label class="label" for="scCategory">Category</label>
+        <div class="select"><select id="scCategory"></select></div>
+      </div>
+      <p id="scError" class="error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="categoryDialog" class="modal" aria-labelledby="categoryDialogTitle">
+    <form id="categoryForm" class="modal-body" novalidate autocomplete="off">
+      <h2 id="categoryDialogTitle" class="section">Add category</h2>
+      <div class="field">
+        <label class="label" for="catName">Name</label>
+        <input id="catName" type="text" maxlength="60" placeholder="e.g. Gifts" autofocus>
+      </div>
+      <p id="catError" class="error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" data-close>Cancel</button>
+        <button type="submit" class="primary">Add</button>
+      </div>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>
 </body>

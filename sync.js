@@ -1,5 +1,5 @@
 // Sync with the Google Sheet through its Apps Script web app (apps-script/Code.gs).
-// Order: send entries waiting on this phone, then pull the whole sheet back.
+// Order: send new categories/shortcuts, then entries waiting on this phone, then pull the whole sheet back.
 
 import * as db from './db.js';
 
@@ -29,12 +29,26 @@ async function run() {
   if (!navigator.onLine) return report({ state: 'offline' });
   report({ state: 'syncing' });
   try {
+    // 1. Categories and shortcuts added on the phone, so the sheet's lists have them.
+    const queue = (await db.get('pendingLists')) || [];
+    if (queue.length) {
+      await call(settings, {
+        action: 'addLists',
+        categories: queue.filter((op) => op.type === 'category').map((op) => op.name),
+        shortcuts: queue.filter((op) => op.type === 'shortcut').map(({ name, amount, category }) => ({ name, amount, category })),
+      });
+      const sent = new Set(queue.map((op) => op.id));
+      const left = ((await db.get('pendingLists')) || []).filter((op) => !sent.has(op.id)); // keep any added meanwhile
+      await db.set('pendingLists', left);
+    }
+    // 2. Expenses waiting on the phone.
     const pending = (await db.allExpenses()).filter((e) => e.status === 'pending');
     if (pending.length) {
       const entries = pending.map(({ id, date, amount, category, note }) => ({ id, date, amount, category, note }));
       await call(settings, { action: 'add', entries });
       await db.markSynced(pending.map((e) => e.id));
     }
+    // 3. Read the whole sheet back.
     const data = await call(settings, { action: 'pull' });
     await db.replaceSynced(data.expenses);
     await db.set('categories', data.categories);
@@ -64,6 +78,9 @@ async function call(settings, payload) {
     data = await res.json();
   } catch {
     throw new Error('Unexpected reply. Check the Web app URL, and that access is set to "Anyone".');
+  }
+  if (!data.ok && /^Unknown action/.test(data.error || '')) {
+    throw new Error('The sheet script is out of date. Paste the latest Code.gs and deploy a new version (see README).');
   }
   if (!data.ok) throw new Error(data.error || 'The sheet script reported an error.');
   return data;

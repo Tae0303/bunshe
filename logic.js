@@ -101,6 +101,34 @@ export const formatMoney = (n) =>
 /** 'Hobbies (Board games, …)' → 'Hobbies' for chips and lists. */
 export const shortName = (category) => category.replace(/\s*\(.*\)\s*$/, '') || category;
 
+const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Categories and shortcuts added on the phone wait in a queue until they reach the sheet.
+ * These merge that queue over the lists last read from the sheet, so new items show at once.
+ */
+export function mergeCategories(fromSheet, queue) {
+  const out = [...fromSheet];
+  for (const op of queue) {
+    if (op.type === 'category' && !out.some((c) => sameName(c, op.name))) out.push(op.name);
+  }
+  return out;
+}
+
+export function mergeShortcuts(fromSheet, queue) {
+  const out = fromSheet.map((s) => ({ ...s }));
+  for (const op of queue) {
+    if (op.type !== 'shortcut') continue;
+    const s = { name: op.name, amount: op.amount, category: op.category };
+    const i = out.findIndex((x) => sameName(x.name, op.name));
+    if (i >= 0) out[i] = s;
+    else out.push(s);
+  }
+  return out;
+}
+
+export const hasName = (names, name) => names.some((n) => sameName(n, name));
+
 export function toCsv(expenses) {
   const cell = (v) => {
     const s = String(v);

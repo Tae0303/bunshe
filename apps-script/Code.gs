@@ -2,7 +2,7 @@
  * Accountant At Home: the Home-tab script plus a sync API for the Bunshe app.
  *
  * Paste this over the old Code.gs. Everything the Home tab did still works, and:
- *   - doPost() lets the app send new entries and read the sheet back
+ *   - doPost() lets the app send new entries, add categories and shortcuts, and read the sheet back
  *   - fixes spec issues #1 (monthly trigger made "[object Object]"),
  *     #3 (clearing the Shortcut cell threw an error) and #6 (two time zones)
  * Setup steps: README.md in the app's repository.
@@ -132,10 +132,15 @@ function doPost(e) {
     const key = PropertiesService.getScriptProperties().getProperty('SYNC_KEY');
     if (!key || req.key !== key) return reply_({ ok: false, error: 'Wrong sync key. Run createSyncKey again and copy the key from the log.' });
     if (req.action === 'pull') return reply_(Object.assign({ ok: true }, pull_()));
-    if (req.action === 'add') {
+    if (req.action === 'add' || req.action === 'addLists') {
       const lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
+        if (req.action === 'addLists') {
+          (req.categories || []).forEach(addCategory_);
+          (req.shortcuts || []).forEach(addShortcut_);
+          return reply_({ ok: true });
+        }
         const added = req.entries.filter(addFromApp_).length;
         return reply_({ ok: true, added: added });
       } finally {
@@ -158,6 +163,36 @@ function addFromApp_(entry) {
   if (!(amount >= 0)) throw new Error('Bad amount: ' + entry.amount);
   const date = Utilities.parseDate(entry.date, tz_(), 'yyyy-MM-dd');
   return appendExpense_(date, amount, String(entry.category || ''), String(entry.note || ''), String(entry.id));
+}
+
+const sameName_ = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+/** Adds a category in the first empty cell of the Categories tab (so "Others" stays last). Skips names already there. */
+function addCategory_(name) {
+  name = String(name || '').trim();
+  if (!name) return;
+  const sheet = SpreadsheetApp.getActive().getSheetByName('Categories');
+  if (!sheet) throw new Error('Categories tab not found.');
+  const values = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 1).getValues();
+  if (values.some(([v]) => v !== '' && sameName_(v, name))) return;
+  const empty = values.findIndex(([v]) => v === '');
+  const row = empty >= 0 ? empty + 2 : sheet.getMaxRows() + 1;
+  if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 10);
+  sheet.getRange(row, 1).setValue(name);
+}
+
+/** Adds a shortcut under the last one on the Shortcut tab; a name already there gets its amount and category updated. */
+function addShortcut_(s) {
+  const name = String((s && s.name) || '').trim();
+  if (!name) return;
+  const sheet = SpreadsheetApp.getActive().getSheetByName('Shortcut');
+  if (!sheet) throw new Error('Shortcut tab not found.');
+  const last = Math.max(sheet.getLastRow(), 1);
+  const names = last > 1 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
+  const found = names.findIndex(([v]) => sameName_(v, name));
+  const row = found >= 0 ? found + 2 : last + 1;
+  if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 10);
+  sheet.getRange(row, 1, 1, 3).setValues([[name, Number(s.amount) || 0, String(s.category || '')]]);
 }
 
 function pull_() {

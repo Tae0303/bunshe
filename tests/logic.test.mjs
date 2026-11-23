@@ -2,7 +2,31 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   monthLabel, daysInMonth, shiftMonth, daysCounted, summarize, parseAmount, round2, shortName, toCsv, weekdayIndex,
+  mergeCategories, mergeShortcuts, hasName,
 } from '../logic.js';
+
+test('categories added on the phone show before they reach the sheet, without duplicates', () => {
+  const queue = [
+    { id: '1', type: 'category', name: 'Gifts' },
+    { id: '2', type: 'category', name: 'transit' }, // already there, different case
+    { id: '3', type: 'shortcut', name: 'Coffee', amount: 60, category: 'Snack & Beverage' },
+  ];
+  assert.deepEqual(mergeCategories(['Food & Drinks', 'Transit', 'Others'], queue), ['Food & Drinks', 'Transit', 'Others', 'Gifts']);
+});
+
+test('shortcuts added on the phone are appended, or replace one with the same name', () => {
+  const sheet = [{ name: 'Coffee', amount: 55, category: 'Snack & Beverage' }];
+  const queue = [
+    { id: '1', type: 'shortcut', name: 'coffee', amount: 60, category: 'Snack & Beverage' },
+    { id: '2', type: 'shortcut', name: 'Lunch set', amount: 89, category: 'Food & Drinks' },
+  ];
+  assert.deepEqual(mergeShortcuts(sheet, queue), [
+    { name: 'coffee', amount: 60, category: 'Snack & Beverage' },
+    { name: 'Lunch set', amount: 89, category: 'Food & Drinks' },
+  ]);
+  assert.equal(sheet[0].amount, 55); // the sheet copy is not changed
+  assert.ok(hasName(['Food & Drinks'], '  food & drinks '));
+});
 
 test('month names match the sheet tabs', () => {
   assert.equal(monthLabel('2026-11'), 'Nov 2026');

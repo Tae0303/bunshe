@@ -1,6 +1,6 @@
 // Offline support: keeps the app's own files on the phone.
 // Bump VERSION whenever you deploy a change, so phones drop the old copy.
-const VERSION = 'v3';
+const VERSION = 'v5';
 const CACHE = `bunshe-${VERSION}`;
 const SHELL = [
   './',

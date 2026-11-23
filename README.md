@@ -2,7 +2,8 @@
 
 An expense tracker you install on your phone's home screen. It works offline and syncs to your **Accountant At Home** Google Sheet.
 
-- Log a spend in a few taps: **+1 / +5 / +10 / +100** buttons, shortcuts and category chips.
+- Log a spend in a few taps: **+1 / +5 / +10 / +100** buttons, a shortcut dropdown and a sideways-scrolling row of categories.
+- **☰ menu** (top left): add a shortcut or a category. It's saved on the phone at once and added to the sheet's Shortcut / Categories tabs on the next sync.
 - Month view: total, average per day, spending by category, and entries grouped by day in the Thai day colours.
 - Saves on the phone first, then syncs to the sheet, which stays the main copy.
 
