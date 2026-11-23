@@ -2,8 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   monthLabel, daysInMonth, shiftMonth, daysCounted, summarize, parseAmount, round2, shortName, toCsv, weekdayIndex,
-  applyListOps, hasName,
+  applyListOps, hasName, stepAmount,
 } from '../logic.js';
+
+test('step buttons: add, subtract, never below 0, exact decimals', () => {
+  assert.equal([100, 50, 10, 5, 1].reduce((sum, s) => stepAmount(sum, s), 0), 166);
+  assert.equal(stepAmount(167, 50, true), 117);
+  assert.equal(stepAmount(7, 10, true), 0);
+  assert.equal(stepAmount(NaN, 5), 5); // empty or unreadable amount counts as 0
+  assert.equal(stepAmount(12.3, 1, true), 11.3);
+});
 
 const sheetLists = () => ({
   categories: ['Food & Drinks', 'Transit', 'Others'],

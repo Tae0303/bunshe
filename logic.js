@@ -89,6 +89,10 @@ export function summarize(expenses, key, todayIso) {
   return { key, count: rows.length, total: round2(total), days, perDay: days ? total / days : null, categories, rows };
 }
 
+/** One tap on a step button: add the step (or take it away in subtract mode), never below 0. */
+export const stepAmount = (current, step, subtract = false) =>
+  round2(Math.max(0, (Number.isFinite(current) ? current : 0) + (subtract ? -step : step)));
+
 /** '1,234.5' or '฿17' → number rounded to 2 places; NaN when it is not a number. */
 export function parseAmount(text) {
   const n = Number(String(text).replace(/[,\s฿]/g, ''));

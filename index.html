@@ -36,12 +36,16 @@
             <span class="currency">฿</span>
             <input id="amount" inputmode="decimal" placeholder="0" enterkeyhint="done">
           </div>
-          <div class="steps" role="group" aria-label="Add to the amount">
+          <div class="steps" id="steps" role="group" aria-label="Change the amount">
             <button type="button" data-step="1">+1</button>
             <button type="button" data-step="5">+5</button>
             <button type="button" data-step="10">+10</button>
+            <button type="button" data-step="50">+50</button>
             <button type="button" data-step="100">+100</button>
-            <button type="button" id="clearAmount" class="ghost">Clear</button>
+          </div>
+          <div class="step-tools">
+            <button type="button" id="minusMode" aria-pressed="false">− Subtract</button>
+            <button type="button" id="clearAmount">Clear</button>
           </div>
         </div>
 

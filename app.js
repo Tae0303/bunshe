@@ -3,10 +3,10 @@ import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
-  applyListOps, hasName, sameName,
+  applyListOps, hasName, sameName, stepAmount,
 } from './logic.js';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -18,6 +18,7 @@ const $ = (selector) => document.querySelector(selector);
 const els = {
   title: $('#title'), badge: $('#syncBadge'), toast: $('#toast'), version: $('#version'),
   form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
+  stepsGroup: $('#steps'), minusMode: $('#minusMode'),
   shortcut: $('#shortcut'), shortcutsEmpty: $('#shortcutsEmpty'), categories: $('#categories'),
   date: $('#date'), today: $('#today'), note: $('#note'), error: $('#formError'),
   monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
@@ -45,6 +46,7 @@ const state = {
   shortcuts: [],
   expenses: [],
   category: '',
+  minus: false, // "− Subtract" is on: the step buttons take away
   month: monthKey(isoDate()),
   autoDate: '', // the date the app filled in itself; it moves to the new day if untouched
   sync: { state: 'idle' },
@@ -133,8 +135,18 @@ function showError(message) {
   els.error.hidden = !message;
 }
 
+/** Subtract mode: the step buttons read −1 … −100 and take away. */
+function setMinus(on) {
+  state.minus = on;
+  els.minusMode.setAttribute('aria-pressed', String(on));
+  els.stepsGroup.classList.toggle('minus', on);
+  els.stepsGroup.setAttribute('aria-label', on ? 'Take away from the amount' : 'Add to the amount');
+  els.steps.forEach((b) => (b.textContent = `${on ? '−' : '+'}${b.dataset.step}`));
+}
+
 function resetForm() {
   setAmount(0);
+  setMinus(false);
   selectCategory('');
   els.shortcut.value = '';
   els.note.value = '';
@@ -162,10 +174,10 @@ function renderShortcuts() {
 
 els.steps.forEach((button) =>
   button.addEventListener('click', () => {
-    const current = parseAmount(els.amount.value);
-    setAmount((Number.isNaN(current) ? 0 : current) + Number(button.dataset.step));
+    setAmount(stepAmount(parseAmount(els.amount.value), Number(button.dataset.step), state.minus));
   }),
 );
+els.minusMode.addEventListener('click', () => setMinus(!state.minus));
 els.clear.addEventListener('click', () => setAmount(0));
 els.today.addEventListener('click', setToday);
 // Any change to the form clears an old "Enter an amount" / "Pick a category" message.
