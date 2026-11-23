@@ -2,7 +2,8 @@
  * Accountant At Home: the Home-tab script plus a sync API for the Bunshe app.
  *
  * Paste this over the old Code.gs. Everything the Home tab did still works, and:
- *   - doPost() lets the app send new entries, add categories and shortcuts, and read the sheet back
+ *   - doPost() lets the app send new entries, add / rename / delete categories and shortcuts,
+ *     and read the sheet back
  *   - fixes spec issues #1 (monthly trigger made "[object Object]"),
  *     #3 (clearing the Shortcut cell threw an error) and #6 (two time zones)
  * Setup steps: README.md in the app's repository.
@@ -132,13 +133,12 @@ function doPost(e) {
     const key = PropertiesService.getScriptProperties().getProperty('SYNC_KEY');
     if (!key || req.key !== key) return reply_({ ok: false, error: 'Wrong sync key. Run createSyncKey again and copy the key from the log.' });
     if (req.action === 'pull') return reply_(Object.assign({ ok: true }, pull_()));
-    if (req.action === 'add' || req.action === 'addLists') {
+    if (req.action === 'add' || req.action === 'lists') {
       const lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
-        if (req.action === 'addLists') {
-          (req.categories || []).forEach(addCategory_);
-          (req.shortcuts || []).forEach(addShortcut_);
+        if (req.action === 'lists') {
+          (req.ops || []).forEach(applyListOp_);
           return reply_({ ok: true });
         }
         const added = req.entries.filter(addFromApp_).length;
@@ -165,34 +165,107 @@ function addFromApp_(entry) {
   return appendExpense_(date, amount, String(entry.category || ''), String(entry.note || ''), String(entry.id));
 }
 
+/* ---------- Categories and Shortcut tabs (changes made in the app) ---------- */
+
 const sameName_ = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+/** One change from the app's queue. Same ops, same meaning as applyListOps in the app's logic.js. */
+function applyListOp_(op) {
+  switch (op && op.type) {
+    case 'category': return addCategory_(op.name);
+    case 'renameCategory': return renameCategory_(op.from, op.to);
+    case 'deleteCategory': return deleteCategory_(op.name);
+    case 'shortcut': return putShortcut_(op.name, op);
+    case 'updateShortcut': return putShortcut_(op.from, op);
+    case 'deleteShortcut': return deleteShortcut_(op.name);
+    default: throw new Error('Unknown change: ' + (op && op.type));
+  }
+}
+
+function tab_(name) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(name);
+  if (!sheet) throw new Error(name + ' tab not found.');
+  return sheet;
+}
+
+/** Column A of the Categories tab from row 2, and the row of `name` in it (0 if missing). */
+function categoryCells_() {
+  const sheet = tab_('Categories');
+  const values = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 1).getValues();
+  const rowOf = (name) => {
+    const i = values.findIndex(([v]) => v !== '' && sameName_(v, name));
+    return i >= 0 ? i + 2 : 0;
+  };
+  return { sheet: sheet, values: values, rowOf: rowOf };
+}
 
 /** Adds a category in the first empty cell of the Categories tab (so "Others" stays last). Skips names already there. */
 function addCategory_(name) {
   name = String(name || '').trim();
   if (!name) return;
-  const sheet = SpreadsheetApp.getActive().getSheetByName('Categories');
-  if (!sheet) throw new Error('Categories tab not found.');
-  const values = sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), 1).getValues();
-  if (values.some(([v]) => v !== '' && sameName_(v, name))) return;
-  const empty = values.findIndex(([v]) => v === '');
-  const row = empty >= 0 ? empty + 2 : sheet.getMaxRows() + 1;
-  if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 10);
-  sheet.getRange(row, 1).setValue(name);
+  const c = categoryCells_();
+  if (c.rowOf(name)) return;
+  const empty = c.values.findIndex(([v]) => v === '');
+  const row = empty >= 0 ? empty + 2 : c.sheet.getMaxRows() + 1;
+  if (row > c.sheet.getMaxRows()) c.sheet.insertRowsAfter(c.sheet.getMaxRows(), 10);
+  c.sheet.getRange(row, 1).setValue(name);
 }
 
-/** Adds a shortcut under the last one on the Shortcut tab; a name already there gets its amount and category updated. */
-function addShortcut_(s) {
+/** Renames a category, and every past entry, shortcut and the Home form that use it. */
+function renameCategory_(from, to) {
+  from = String(from || '').trim();
+  to = String(to || '').trim();
+  if (!from || !to) return;
+  const c = categoryCells_();
+  const row = c.rowOf(from);
+  const taken = !sameName_(from, to) && c.rowOf(to);
+  if (row) {
+    if (taken) c.sheet.getRange(row, 1).clearContent(); // the new name already exists: the two become one
+    else c.sheet.getRange(row, 1).setValue(to);
+  }
+  const ss = SpreadsheetApp.getActive();
+  ss.getSheets().filter((s) => MONTH_TAB.test(s.getName())).forEach((s) => replaceInColumn_(s, 3, from, to));
+  const shortcuts = ss.getSheetByName('Shortcut');
+  if (shortcuts) replaceInColumn_(shortcuts, 3, from, to);
+  const home = ss.getSheetByName('Home');
+  if (home && sameName_(home.getRange('B3').getValue(), from)) home.getRange('B3').setValue(to);
+}
+
+/** Removes a category from the list. Past entries keep it. */
+function deleteCategory_(name) {
+  const c = categoryCells_();
+  const row = c.rowOf(name);
+  if (row) c.sheet.getRange(row, 1).clearContent();
+}
+
+function replaceInColumn_(sheet, col, from, to) {
+  const last = sheet.getLastRow();
+  if (last < 2) return;
+  sheet.getRange(2, col, last - 1, 1).createTextFinder(from).matchEntireCell(true).matchCase(false).replaceAllWith(to);
+}
+
+/** Row of a shortcut on the Shortcut tab (0 if missing). */
+function shortcutRow_(sheet, name) {
+  const last = sheet.getLastRow();
+  if (last < 2) return 0;
+  const i = sheet.getRange(2, 1, last - 1, 1).getValues().findIndex(([v]) => sameName_(v, name));
+  return i >= 0 ? i + 2 : 0;
+}
+
+/** Updates the shortcut named `key` (rename included), or adds it under the last one. */
+function putShortcut_(key, s) {
   const name = String((s && s.name) || '').trim();
   if (!name) return;
-  const sheet = SpreadsheetApp.getActive().getSheetByName('Shortcut');
-  if (!sheet) throw new Error('Shortcut tab not found.');
-  const last = Math.max(sheet.getLastRow(), 1);
-  const names = last > 1 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
-  const found = names.findIndex(([v]) => sameName_(v, name));
-  const row = found >= 0 ? found + 2 : last + 1;
+  const sheet = tab_('Shortcut');
+  const row = shortcutRow_(sheet, key || name) || Math.max(sheet.getLastRow(), 1) + 1;
   if (row > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 10);
   sheet.getRange(row, 1, 1, 3).setValues([[name, Number(s.amount) || 0, String(s.category || '')]]);
+}
+
+function deleteShortcut_(name) {
+  const sheet = tab_('Shortcut');
+  const row = shortcutRow_(sheet, name);
+  if (row) sheet.deleteRow(row);
 }
 
 function pull_() {

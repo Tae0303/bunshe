@@ -1,5 +1,5 @@
 // Sync with the Google Sheet through its Apps Script web app (apps-script/Code.gs).
-// Order: send new categories/shortcuts, then entries waiting on this phone, then pull the whole sheet back.
+// Order: send category/shortcut changes, then entries waiting on this phone, then pull the whole sheet back.
 
 import * as db from './db.js';
 
@@ -29,14 +29,10 @@ async function run() {
   if (!navigator.onLine) return report({ state: 'offline' });
   report({ state: 'syncing' });
   try {
-    // 1. Categories and shortcuts added on the phone, so the sheet's lists have them.
+    // 1. Category and shortcut changes made on the phone (add, rename, delete), in the order they were made.
     const queue = (await db.get('pendingLists')) || [];
     if (queue.length) {
-      await call(settings, {
-        action: 'addLists',
-        categories: queue.filter((op) => op.type === 'category').map((op) => op.name),
-        shortcuts: queue.filter((op) => op.type === 'shortcut').map(({ name, amount, category }) => ({ name, amount, category })),
-      });
+      await call(settings, { action: 'lists', ops: queue.map(({ id, ...op }) => op) });
       const sent = new Set(queue.map((op) => op.id));
       const left = ((await db.get('pendingLists')) || []).filter((op) => !sent.has(op.id)); // keep any added meanwhile
       await db.set('pendingLists', left);

@@ -3,10 +3,11 @@ import { syncNow, onStatus } from './sync.js';
 import {
   DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
-  mergeCategories, mergeShortcuts, hasName,
+  applyListOps, hasName, sameName,
 } from './logic.js';
 
-const APP_VERSION = '1.1.3';
+const APP_VERSION = '1.2.0';
+const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#06b6d4', '#a16207', '#84cc16', '#d946ef'];
@@ -25,9 +26,12 @@ const els = {
   settingsForm: $('#settingsForm'), syncUrl: $('#syncUrl'), syncKey: $('#syncKey'),
   syncInfo: $('#syncInfo'), syncNowBtn: $('#syncNow'), exportBtn: $('#exportCsv'),
   menuBtn: $('#menuBtn'), menu: $('#menu'),
-  shortcutDialog: $('#shortcutDialog'), shortcutForm: $('#shortcutForm'),
+  shortcutDialog: $('#shortcutDialog'), shortcutForm: $('#shortcutForm'), scTitle: $('#shortcutDialogTitle'),
   scName: $('#scName'), scAmount: $('#scAmount'), scCategory: $('#scCategory'), scError: $('#scError'),
-  categoryDialog: $('#categoryDialog'), categoryForm: $('#categoryForm'), catName: $('#catName'), catError: $('#catError'),
+  scSubmit: $('#scSubmit'), scDelete: $('#scDelete'),
+  categoryDialog: $('#categoryDialog'), categoryForm: $('#categoryForm'), catTitle: $('#categoryDialogTitle'),
+  catName: $('#catName'), catError: $('#catError'), catHint: $('#catHint'), catSubmit: $('#catSubmit'), catDelete: $('#catDelete'),
+  listDialog: $('#listDialog'), listTitle: $('#listDialogTitle'), listItems: $('#listItems'), listAdd: $('#listAdd'),
 };
 
 const state = {
@@ -39,7 +43,9 @@ const state = {
   autoDate: '', // the date the app filled in itself; it moves to the new day if untouched
   sync: { state: 'idle' },
   lastSync: null,
-  queuedLists: 0, // categories/shortcuts added here, not yet in the sheet
+  queuedLists: 0, // category/shortcut changes made here, not yet in the sheet
+  editing: null, // the shortcut or category name being edited, or null when adding
+  returnToList: null, // 'shortcut' | 'category': reopen that list when the edit form closes
 };
 
 const escapeHtml = (s) =>
@@ -136,8 +142,8 @@ function renderShortcuts() {
   els.shortcut.disabled = none;
   els.shortcut.innerHTML =
     `<option value="">${none ? 'No shortcuts yet' : 'Choose a shortcut…'}</option>` +
-    state.shortcuts.map((s, i) => `<option value="${i}">${escapeHtml(s.name)} · ${formatMoney(s.amount)}</option>`).join('');
-  if (picked !== '' && Number(picked) < state.shortcuts.length) els.shortcut.value = picked; // a sync mid-entry keeps the pick
+    state.shortcuts.map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)} · ${formatMoney(s.amount)}</option>`).join('');
+  if (state.shortcuts.some((s) => s.name === picked)) els.shortcut.value = picked; // a sync mid-entry keeps the pick
 }
 
 els.steps.forEach((button) =>
@@ -160,8 +166,7 @@ els.categories.addEventListener('click', (ev) => {
 });
 
 els.shortcut.addEventListener('change', () => {
-  if (els.shortcut.value === '') return;
-  const s = state.shortcuts[Number(els.shortcut.value)];
+  const s = state.shortcuts.find((x) => x.name === els.shortcut.value);
   if (!s) return;
   setAmount(s.amount);
   if (s.category) selectCategory(s.category);
@@ -337,12 +342,21 @@ els.exportBtn.addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 });
 
-/* ---------- Menu: add shortcut / add category ---------- */
+/* ---------- Menu: add, rename and delete shortcuts / categories ---------- */
 
 // Tapping the dimmed backdrop or any [data-close] button closes a dialog.
-for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog]) {
+for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog, els.listDialog]) {
   dialog.addEventListener('click', (ev) => {
     if (ev.target === dialog || ev.target.closest('[data-close]')) dialog.close();
+  });
+}
+// After editing an item opened from a list, go back to that list.
+for (const dialog of [els.shortcutDialog, els.categoryDialog]) {
+  dialog.addEventListener('close', () => {
+    const kind = state.returnToList;
+    state.returnToList = null;
+    state.editing = null;
+    if (kind) openList(kind);
   });
 }
 
@@ -353,6 +367,8 @@ els.menu.addEventListener('click', (ev) => {
   els.menu.close();
   if (action === 'add-shortcut') openShortcutDialog();
   else if (action === 'add-category') openCategoryDialog();
+  else if (action === 'edit-shortcuts') openList('shortcut');
+  else if (action === 'edit-categories') openList('category');
   else if (action === 'sync') syncNow();
   else if (action === 'settings') showView('settings');
 });
@@ -362,26 +378,74 @@ function dialogError(el, message) {
   el.hidden = !message;
 }
 
-function openShortcutDialog() {
-  // Start from what is on the Add screen, so "type it once, then save it as a shortcut" works.
-  const amount = parseAmount(els.amount.value);
-  els.scName.value = '';
+/* The list of shortcuts or categories to pick one to edit. */
+function openList(kind) {
+  const isShortcut = kind === 'shortcut';
+  els.listDialog.dataset.kind = kind;
+  els.listTitle.textContent = isShortcut ? 'Shortcuts' : 'Categories';
+  els.listAdd.textContent = isShortcut ? 'Add shortcut' : 'Add category';
+  const items = isShortcut ? state.shortcuts : state.categories;
+  els.listItems.innerHTML = items.length
+    ? items.map((item, i) => isShortcut
+      ? `<li><button type="button" data-index="${i}"><span class="dot" style="background:${colorOf(item.category)}"></span>
+          <span class="what"><span>${escapeHtml(item.name)}</span><small>${formatMoney(item.amount)} · ${escapeHtml(shortName(item.category || '—'))}</small></span>${CHEVRON}</button></li>`
+      : `<li><button type="button" data-index="${i}"><span class="dot" style="background:${colorOf(item)}"></span>
+          <span class="what"><span>${escapeHtml(item)}</span></span>${CHEVRON}</button></li>`).join('')
+    : `<li class="empty">No ${isShortcut ? 'shortcuts' : 'categories'} yet.</li>`;
+  if (!els.listDialog.open) els.listDialog.showModal();
+}
+
+els.listItems.addEventListener('click', (ev) => {
+  const button = ev.target.closest('[data-index]');
+  if (!button) return;
+  const kind = els.listDialog.dataset.kind;
+  const i = Number(button.dataset.index);
+  els.listDialog.close();
+  if (kind === 'shortcut') openShortcutDialog(state.shortcuts[i]);
+  else openCategoryDialog(state.categories[i]);
+  state.returnToList = kind;
+});
+els.listAdd.addEventListener('click', () => {
+  const kind = els.listDialog.dataset.kind;
+  els.listDialog.close();
+  if (kind === 'shortcut') openShortcutDialog();
+  else openCategoryDialog();
+  state.returnToList = kind;
+});
+
+/** Add form when `existing` is empty; edit form (with Delete) for an existing shortcut. */
+function openShortcutDialog(existing = null) {
+  state.editing = existing?.name ?? null;
+  // A new shortcut starts from what is on the Add screen: "type it once, then save it as a shortcut".
+  const amount = existing ? existing.amount : parseAmount(els.amount.value);
+  const category = existing ? existing.category : state.category;
+  els.scTitle.textContent = existing ? 'Edit shortcut' : 'Add shortcut';
+  els.scSubmit.textContent = existing ? 'Save' : 'Add';
+  els.scDelete.hidden = !existing;
+  els.scName.value = existing ? existing.name : '';
   els.scAmount.value = amount > 0 ? String(amount) : '';
+  const choices = category && !hasName(state.categories, category) ? [...state.categories, category] : state.categories;
   els.scCategory.innerHTML =
     '<option value="">Choose a category…</option>' +
-    state.categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  els.scCategory.value = state.category;
+    choices.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  els.scCategory.value = category;
   dialogError(els.scError, '');
   els.shortcutDialog.showModal();
 }
 
-function openCategoryDialog() {
-  els.catName.value = '';
+/** Add form when `existing` is empty; rename form (with Delete) for an existing category. */
+function openCategoryDialog(existing = null) {
+  state.editing = existing;
+  els.catTitle.textContent = existing ? 'Rename category' : 'Add category';
+  els.catSubmit.textContent = existing ? 'Save' : 'Add';
+  els.catDelete.hidden = !existing;
+  els.catHint.hidden = !existing;
+  els.catName.value = existing || '';
   dialogError(els.catError, '');
   els.categoryDialog.showModal();
 }
 
-/** Queues a new category or shortcut for the sheet and shows it right away. */
+/** Queues a category/shortcut change for the sheet and shows it right away. */
 async function queueListItem(item) {
   const queue = (await db.get('pendingLists')) || [];
   queue.push({ id: newId(), ...item });
@@ -392,12 +456,14 @@ async function queueListItem(item) {
 
 els.shortcutForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  const original = state.editing;
   const name = els.scName.value.trim();
   const amount = parseAmount(els.scAmount.value);
   const category = els.scCategory.value;
+  const others = state.shortcuts.map((s) => s.name).filter((n) => !(original && sameName(n, original)));
   const problem = !name
     ? 'Enter a name.'
-    : hasName(state.shortcuts.map((s) => s.name), name)
+    : hasName(others, name)
       ? `You already have a shortcut called "${name}".`
       : !(amount > 0)
         ? 'Enter an amount above 0.'
@@ -405,25 +471,57 @@ els.shortcutForm.addEventListener('submit', async (ev) => {
           ? 'Pick a category.'
           : '';
   if (problem) return dialogError(els.scError, problem);
-  await queueListItem({ type: 'shortcut', name, amount, category });
+  if (original) await queueListItem({ type: 'updateShortcut', from: original, name, amount, category });
+  else await queueListItem({ type: 'shortcut', name, amount, category });
   els.shortcutDialog.close();
-  toast(`Shortcut "${name}" added`);
+  toast(original ? `Shortcut "${name}" saved` : `Shortcut "${name}" added`);
+});
+
+els.scDelete.addEventListener('click', async () => {
+  const name = state.editing;
+  if (!name || !confirm(`Delete the shortcut "${name}"?`)) return;
+  await queueListItem({ type: 'deleteShortcut', name });
+  els.shortcutDialog.close();
+  toast(`Shortcut "${name}" deleted`);
 });
 
 els.categoryForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  const original = state.editing;
   const name = els.catName.value.trim();
+  const others = state.categories.filter((c) => !(original && sameName(c, original)));
   const problem = !name
     ? 'Enter a name.'
-    : hasName(state.categories, name)
+    : hasName(others, name)
       ? `"${name}" is already a category.`
       : '';
   if (problem) return dialogError(els.catError, problem);
-  await queueListItem({ type: 'category', name });
+  if (!original) {
+    await queueListItem({ type: 'category', name });
+    els.categoryDialog.close();
+    selectCategory(name); // ready to use straight away
+    toast(`Category "${name}" added`);
+    return;
+  }
+  if (name !== original) {
+    const wasPicked = sameName(state.category, original);
+    await db.renameCategory(original, name); // entries on this phone follow the new name
+    await queueListItem({ type: 'renameCategory', from: original, to: name });
+    if (wasPicked) selectCategory(name);
+  }
   els.categoryDialog.close();
-  selectCategory(name); // ready to use straight away
-  toast(`Category "${name}" added`);
+  toast(`Renamed to "${name}"`);
 });
+
+els.catDelete.addEventListener('click', async () => {
+  const name = state.editing;
+  if (!name || !confirm(`Delete the category "${name}"?\n\nPast entries keep it. You just won't be able to pick it for new ones.`)) return;
+  await queueListItem({ type: 'deleteCategory', name });
+  if (sameName(state.category, name)) selectCategory('');
+  els.categoryDialog.close();
+  toast(`Category "${name}" deleted`);
+});
+
 els.shortcutForm.addEventListener('input', () => dialogError(els.scError, ''));
 els.categoryForm.addEventListener('input', () => dialogError(els.catError, ''));
 
@@ -434,9 +532,10 @@ async function reloadData() {
     db.allExpenses(), db.get('categories'), db.get('shortcuts'), db.get('lastSync'), db.get('pendingLists'),
   ]);
   const queued = queue || [];
+  const lists = applyListOps({ categories: categories?.length ? categories : DEFAULT_CATEGORIES, shortcuts: shortcuts || [] }, queued);
   state.expenses = expenses;
-  state.categories = mergeCategories(categories?.length ? categories : DEFAULT_CATEGORIES, queued);
-  state.shortcuts = mergeShortcuts(shortcuts || [], queued);
+  state.categories = lists.categories;
+  state.shortcuts = lists.shortcuts;
   state.queuedLists = queued.length;
   state.lastSync = lastSync || null;
   renderCategories();

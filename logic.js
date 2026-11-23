@@ -101,33 +101,60 @@ export const formatMoney = (n) =>
 /** 'Hobbies (Board games, …)' → 'Hobbies' for chips and lists. */
 export const shortName = (category) => category.replace(/\s*\(.*\)\s*$/, '') || category;
 
-const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** Names match ignoring case and surrounding spaces ("transit" = "Transit "). */
+export const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+export const hasName = (names, name) => names.some((n) => sameName(n, name));
 
 /**
- * Categories and shortcuts added on the phone wait in a queue until they reach the sheet.
- * These merge that queue over the lists last read from the sheet, so new items show at once.
+ * Category and shortcut changes made on the phone wait in a queue until they reach the sheet.
+ * This replays that queue, in order, over the lists last read from the sheet, so changes show at once.
+ * The sheet script (applyListOp_ in Code.gs) applies the same ops the same way.
+ *   { type: 'category', name }                          add a category
+ *   { type: 'renameCategory', from, to }                rename; shortcuts using it follow
+ *   { type: 'deleteCategory', name }
+ *   { type: 'shortcut', name, amount, category }        add (or replace one with that name)
+ *   { type: 'updateShortcut', from, name, amount, category }
+ *   { type: 'deleteShortcut', name }
  */
-export function mergeCategories(fromSheet, queue) {
-  const out = [...fromSheet];
+export function applyListOps(fromSheet, queue) {
+  let categories = [...fromSheet.categories];
+  let shortcuts = fromSheet.shortcuts.map((s) => ({ ...s }));
+  const putShortcut = (key, s) => {
+    const i = shortcuts.findIndex((x) => sameName(x.name, key));
+    if (i >= 0) shortcuts[i] = s;
+    else shortcuts.push(s);
+  };
   for (const op of queue) {
-    if (op.type === 'category' && !out.some((c) => sameName(c, op.name))) out.push(op.name);
+    switch (op.type) {
+      case 'category':
+        if (!hasName(categories, op.name)) categories.push(op.name);
+        break;
+      case 'renameCategory': {
+        const i = categories.findIndex((c) => sameName(c, op.from));
+        if (hasName(categories, op.to) && !sameName(op.from, op.to)) {
+          if (i >= 0) categories.splice(i, 1); // the new name already exists: the two become one
+        } else if (i >= 0) {
+          categories[i] = op.to;
+        }
+        shortcuts = shortcuts.map((s) => (sameName(s.category, op.from) ? { ...s, category: op.to } : s));
+        break;
+      }
+      case 'deleteCategory':
+        categories = categories.filter((c) => !sameName(c, op.name));
+        break;
+      case 'shortcut':
+        putShortcut(op.name, { name: op.name, amount: op.amount, category: op.category });
+        break;
+      case 'updateShortcut':
+        putShortcut(op.from, { name: op.name, amount: op.amount, category: op.category });
+        break;
+      case 'deleteShortcut':
+        shortcuts = shortcuts.filter((s) => !sameName(s.name, op.name));
+        break;
+    }
   }
-  return out;
+  return { categories, shortcuts };
 }
-
-export function mergeShortcuts(fromSheet, queue) {
-  const out = fromSheet.map((s) => ({ ...s }));
-  for (const op of queue) {
-    if (op.type !== 'shortcut') continue;
-    const s = { name: op.name, amount: op.amount, category: op.category };
-    const i = out.findIndex((x) => sameName(x.name, op.name));
-    if (i >= 0) out[i] = s;
-    else out.push(s);
-  }
-  return out;
-}
-
-export const hasName = (names, name) => names.some((n) => sameName(n, name));
 
 export function toCsv(expenses) {
   const cell = (v) => {

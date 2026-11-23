@@ -151,6 +151,12 @@
         <button type="button" data-action="add-category">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5V5a1.5 1.5 0 0 1 1.5-1.5h7.5l8 8-9 9z"/><circle cx="8.5" cy="8.5" r="1.5"/></svg>Add category
         </button>
+        <button type="button" data-action="edit-shortcuts">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>Edit shortcuts
+        </button>
+        <button type="button" data-action="edit-categories">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>Edit categories
+        </button>
         <hr>
         <button type="button" data-action="sync">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 0 1-14 5.3M4 12a8 8 0 0 1 14-5.3M18 3v4h-4M6 21v-4h4"/></svg>Sync now
@@ -159,7 +165,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings
         </button>
       </nav>
-      <p class="drawer-note">New shortcuts and categories are saved on this phone and added to your sheet on the next sync.</p>
+      <p class="drawer-note">Changes to shortcuts and categories are saved on this phone and reach your sheet on the next sync.</p>
     </div>
   </dialog>
 
@@ -181,8 +187,9 @@
       <p id="scError" class="error" role="alert" hidden></p>
       <div class="modal-actions">
         <button type="button" class="secondary" data-close>Cancel</button>
-        <button type="submit" class="primary">Add</button>
+        <button type="submit" class="primary" id="scSubmit">Add</button>
       </div>
+      <button type="button" id="scDelete" class="danger" hidden>Delete shortcut</button>
     </form>
   </dialog>
 
@@ -193,12 +200,28 @@
         <label class="label" for="catName">Name</label>
         <input id="catName" type="text" maxlength="60" placeholder="e.g. Gifts" autofocus>
       </div>
+      <p id="catHint" class="hint modal-hint" hidden>Renaming also updates past entries and shortcuts in this category.</p>
       <p id="catError" class="error" role="alert" hidden></p>
       <div class="modal-actions">
         <button type="button" class="secondary" data-close>Cancel</button>
-        <button type="submit" class="primary">Add</button>
+        <button type="submit" class="primary" id="catSubmit">Add</button>
       </div>
+      <button type="button" id="catDelete" class="danger" hidden>Delete category</button>
     </form>
+  </dialog>
+
+  <dialog id="listDialog" class="modal" aria-labelledby="listDialogTitle">
+    <div class="modal-body">
+      <div class="list-head">
+        <h2 id="listDialogTitle" class="section">Shortcuts</h2>
+        <button type="button" class="icon-only" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="hint">Tap one to rename or delete it.</p>
+      <ul id="listItems" class="manage-list"></ul>
+      <button type="button" id="listAdd" class="secondary">Add shortcut</button>
+    </div>
   </dialog>
 
   <div id="toast" class="toast" role="status" hidden></div>

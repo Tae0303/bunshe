@@ -2,30 +2,47 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   monthLabel, daysInMonth, shiftMonth, daysCounted, summarize, parseAmount, round2, shortName, toCsv, weekdayIndex,
-  mergeCategories, mergeShortcuts, hasName,
+  applyListOps, hasName,
 } from '../logic.js';
 
-test('categories added on the phone show before they reach the sheet, without duplicates', () => {
-  const queue = [
-    { id: '1', type: 'category', name: 'Gifts' },
-    { id: '2', type: 'category', name: 'transit' }, // already there, different case
-    { id: '3', type: 'shortcut', name: 'Coffee', amount: 60, category: 'Snack & Beverage' },
-  ];
-  assert.deepEqual(mergeCategories(['Food & Drinks', 'Transit', 'Others'], queue), ['Food & Drinks', 'Transit', 'Others', 'Gifts']);
+const sheetLists = () => ({
+  categories: ['Food & Drinks', 'Transit', 'Others'],
+  shortcuts: [{ name: 'Coffee', amount: 55, category: 'Food & Drinks' }],
 });
 
-test('shortcuts added on the phone are appended, or replace one with the same name', () => {
-  const sheet = [{ name: 'Coffee', amount: 55, category: 'Snack & Beverage' }];
-  const queue = [
-    { id: '1', type: 'shortcut', name: 'coffee', amount: 60, category: 'Snack & Beverage' },
-    { id: '2', type: 'shortcut', name: 'Lunch set', amount: 89, category: 'Food & Drinks' },
-  ];
-  assert.deepEqual(mergeShortcuts(sheet, queue), [
-    { name: 'coffee', amount: 60, category: 'Snack & Beverage' },
-    { name: 'Lunch set', amount: 89, category: 'Food & Drinks' },
+test('added categories show before they reach the sheet, without duplicates', () => {
+  const { categories } = applyListOps(sheetLists(), [
+    { type: 'category', name: 'Gifts' },
+    { type: 'category', name: 'transit' }, // already there, different case
   ]);
-  assert.equal(sheet[0].amount, 55); // the sheet copy is not changed
+  assert.deepEqual(categories, ['Food & Drinks', 'Transit', 'Others', 'Gifts']);
   assert.ok(hasName(['Food & Drinks'], '  food & drinks '));
+});
+
+test('renaming a category keeps its place and moves its shortcuts along', () => {
+  const r = applyListOps(sheetLists(), [{ type: 'renameCategory', from: 'Food & Drinks', to: 'Food' }]);
+  assert.deepEqual(r.categories, ['Food', 'Transit', 'Others']);
+  assert.equal(r.shortcuts[0].category, 'Food');
+});
+
+test('changes replay in order: add, rename, then delete', () => {
+  const r = applyListOps(sheetLists(), [
+    { type: 'category', name: 'Gifts' },
+    { type: 'renameCategory', from: 'Gifts', to: 'Presents' },
+    { type: 'deleteCategory', name: 'presents' },
+  ]);
+  assert.deepEqual(r.categories, ['Food & Drinks', 'Transit', 'Others']);
+});
+
+test('shortcuts: add, edit (rename + new amount), delete', () => {
+  const start = sheetLists();
+  const r = applyListOps(start, [
+    { type: 'shortcut', name: 'Lunch set', amount: 89, category: 'Food & Drinks' },
+    { type: 'updateShortcut', from: 'coffee', name: 'Iced coffee', amount: 65, category: 'Food & Drinks' },
+    { type: 'deleteShortcut', name: 'LUNCH SET' },
+  ]);
+  assert.deepEqual(r.shortcuts, [{ name: 'Iced coffee', amount: 65, category: 'Food & Drinks' }]);
+  assert.equal(start.shortcuts[0].name, 'Coffee'); // the sheet copy is not changed
 });
 
 test('month names match the sheet tabs', () => {

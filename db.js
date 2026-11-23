@@ -69,6 +69,17 @@ export async function replaceSynced(sheetRows) {
   return finished(tx);
 }
 
+/** Renaming a category also renames it on the entries stored here, so the phone matches the sheet. */
+export async function renameCategory(from, to) {
+  const match = (c) => String(c).trim().toLowerCase() === String(from).trim().toLowerCase();
+  const current = await allExpenses();
+  const db = await open();
+  const tx = db.transaction('expenses', 'readwrite');
+  const store = tx.objectStore('expenses');
+  for (const e of current) if (match(e.category)) store.put({ ...e, category: to });
+  return finished(tx);
+}
+
 export async function get(key) {
   const db = await open();
   return result(db.transaction('kv').objectStore('kv').get(key));
