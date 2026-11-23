@@ -6,7 +6,7 @@ import {
   applyListOps, hasName, sameName, stepAmount, moveTo,
 } from './logic.js';
 
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.6.2';
 const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -176,8 +176,8 @@ function resetForm() {
 
 function renderCategories() {
   els.categories.innerHTML = state.categories
-    .map((c) => `<button type="button" class="chip" data-cat="${escapeHtml(c)}" aria-pressed="${c === state.category}" title="${escapeHtml(c)}">
-      <span class="dot" style="background:${colorOf(c)}"></span>${escapeHtml(shortName(c))}</button>`)
+    // No colour dot here: category names carry their own emoji.
+    .map((c) => `<button type="button" class="chip" data-cat="${escapeHtml(c)}" aria-pressed="${c === state.category}" title="${escapeHtml(c)}">${escapeHtml(shortName(c))}</button>`)
     .join('');
 }
 
@@ -575,13 +575,14 @@ function openList(kind) {
   els.listAdd.textContent = isShortcut ? 'Add shortcut' : 'Add category';
   const items = isShortcut ? state.shortcuts : state.categories;
   // Each row: the item (tap to rename / delete) and a ≡ grip to drag it to a new place.
+  // Categories show their colour dot (as in the Month view); shortcuts do not.
   const row = (i, name, dot, sub) => `<li class="reorder-row">
-      <button type="button" class="row-main" data-index="${i}"><span class="dot" style="background:${dot}"></span>
+      <button type="button" class="row-main" data-index="${i}">${dot ? `<span class="dot" style="background:${dot}"></span>` : ''}
         <span class="what"><span>${escapeHtml(name)}</span>${sub ? `<small>${sub}</small>` : ''}</span></button>
       <button type="button" class="grip" data-grip="${i}" aria-label="Move ${escapeHtml(name)}: drag, or use the up and down arrow keys">${GRIP}</button></li>`;
   els.listItems.innerHTML = items.length
     ? items.map((item, i) => isShortcut
-      ? row(i, item.name, colorOf(item.category), `${formatMoney(item.amount)} · ${escapeHtml(shortName(item.category || '—'))}`)
+      ? row(i, item.name, null, `${formatMoney(item.amount)} · ${escapeHtml(shortName(item.category || '—'))}`)
       : row(i, item, colorOf(item))).join('')
     : `<li class="empty">No ${isShortcut ? 'shortcuts' : 'categories'} yet.</li>`;
   if (!els.listDialog.open) els.listDialog.showModal();

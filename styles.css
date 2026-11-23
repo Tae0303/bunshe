@@ -185,7 +185,6 @@ main { max-width: 560px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-ar
   white-space: nowrap;
 }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.chip[aria-pressed="true"] .dot { box-shadow: 0 0 0 2px var(--accent-ink); }
 .dot { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; }
 
 /* ---------- Inputs + buttons ---------- */
