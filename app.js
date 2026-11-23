@@ -5,7 +5,7 @@ import {
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
 } from './logic.js';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 const PALETTE = ['#f97316', '#8b5cf6', '#3b82f6', '#ef4444', '#eab308', '#ec4899', '#22c55e', '#64748b'];
 const OTHER_COLOR = '#94a3b8';
@@ -15,7 +15,7 @@ const $ = (selector) => document.querySelector(selector);
 const els = {
   title: $('#title'), badge: $('#syncBadge'), toast: $('#toast'), version: $('#version'),
   form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
-  shortcutsField: $('#shortcutsField'), shortcuts: $('#shortcuts'), categories: $('#categories'),
+  shortcuts: $('#shortcuts'), shortcutsEmpty: $('#shortcutsEmpty'), categories: $('#categories'),
   date: $('#date'), today: $('#today'), note: $('#note'), error: $('#formError'),
   monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
   total: $('#mTotal'), count: $('#mCount'), avg: $('#mAvg'), days: $('#mDays'),
@@ -112,7 +112,9 @@ function renderCategories() {
 }
 
 function renderShortcuts() {
-  els.shortcutsField.hidden = state.shortcuts.length === 0;
+  const none = state.shortcuts.length === 0;
+  els.shortcuts.hidden = none;
+  els.shortcutsEmpty.hidden = !none;
   els.shortcuts.innerHTML = state.shortcuts
     .map((s, i) => `<button type="button" class="chip" data-shortcut="${i}">
       <span class="dot" style="background:${colorOf(s.category)}"></span>${escapeHtml(s.name)} <b>${formatMoney(s.amount)}</b></button>`)
@@ -354,6 +356,7 @@ setInterval(() => {
 async function init() {
   els.version.textContent = APP_VERSION;
   document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+  document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.goto)));
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   navigator.storage?.persist?.().catch(() => {});
   resetForm();

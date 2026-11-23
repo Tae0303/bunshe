@@ -124,8 +124,22 @@ main { max-width: 560px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-ar
 
 .chips { display: flex; gap: 8px; }
 .chips.wrap { flex-wrap: wrap; }
-.chips.scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; }
+/* One line that scrolls sideways; the faded right edge hints there is more. */
+.chips.scroll {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  margin: 0 -16px;
+  padding: 0 16px 2px;
+  scroll-padding: 0 16px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
 .chips.scroll::-webkit-scrollbar { display: none; }
+.chips.scroll .chip { scroll-snap-align: start; }
+.chips.scroll::after { content: ""; flex: none; width: 16px; } /* room to scroll the last chip clear of the fade */
 .chip {
   display: inline-flex;
   align-items: center;
@@ -252,6 +266,8 @@ main { max-width: 560px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-ar
 
 .section { margin: 0 0 8px; font-size: 17px; }
 .hint { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+#shortcutsEmpty { margin: 0; }
+.link { padding: 0; border: 0; background: none; color: var(--accent); font-weight: 600; text-decoration: underline; }
 .settings label { display: block; margin-bottom: 12px; color: var(--muted); font-size: 13px; font-weight: 600; }
 .settings label input { display: block; margin-top: 6px; color: var(--ink); font-weight: 400; }
 #syncInfo { margin: 0; font-size: 14px; line-height: 1.7; }
