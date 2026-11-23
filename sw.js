@@ -1,6 +1,6 @@
 // Offline support: keeps the app's own files on the phone.
 // Bump VERSION whenever you deploy a change, so phones drop the old copy.
-const VERSION = 'v7';
+const VERSION = 'v8';
 const CACHE = `bunshe-${VERSION}`;
 const SHELL = [
   './',
@@ -14,6 +14,7 @@ const SHELL = [
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
+  'icons/favicon.svg',
 ];
 
 self.addEventListener('install', (event) => {
