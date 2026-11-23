@@ -6,7 +6,7 @@ import {
   applyListOps, hasName, sameName,
 } from './logic.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const CHEVRON = '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -32,6 +32,9 @@ const els = {
   categoryDialog: $('#categoryDialog'), categoryForm: $('#categoryForm'), catTitle: $('#categoryDialogTitle'),
   catName: $('#catName'), catError: $('#catError'), catHint: $('#catHint'), catSubmit: $('#catSubmit'), catDelete: $('#catDelete'),
   listDialog: $('#listDialog'), listTitle: $('#listDialogTitle'), listItems: $('#listItems'), listAdd: $('#listAdd'),
+  entriesHint: $('#entriesHint'), entryDialog: $('#entryDialog'), entryAmount: $('#entryAmount'),
+  entryCategory: $('#entryCategory'), entryDate: $('#entryDate'), entryNote: $('#entryNote'),
+  entryNoteLabel: $('#entryNoteLabel'), entryStatus: $('#entryStatus'), entryDelete: $('#entryDelete'),
 };
 
 const state = {
@@ -44,6 +47,8 @@ const state = {
   sync: { state: 'idle' },
   lastSync: null,
   queuedLists: 0, // category/shortcut changes made here, not yet in the sheet
+  syncRequested: false, // you tapped Sync now: show progress even when nothing is waiting
+  viewing: null, // the expense open in the entry card
   editing: null, // the shortcut or category name being edited, or null when adding
   returnToList: null, // 'shortcut' | 'category': reopen that list when the edit form closes
 };
@@ -55,7 +60,10 @@ const colorOf = (category) => {
   const i = state.categories.filter((c) => c !== 'Others').indexOf(category);
   return i >= 0 ? PALETTE[i % PALETTE.length] : OTHER_COLOR;
 };
-const pendingCount = () => state.expenses.filter((e) => e.status === 'pending').length + state.queuedLists;
+// Waiting to sync: new entries, deleted entries, and category/shortcut changes.
+const pendingCount = () => state.expenses.filter((e) => e.status !== 'synced').length + state.queuedLists;
+// What the app shows: everything except entries deleted here (they wait only to be deleted in the sheet).
+const visibleExpenses = () => state.expenses.filter((e) => e.status !== 'deleted');
 
 function newId() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -206,8 +214,9 @@ els.form.addEventListener('submit', async (ev) => {
 
 function renderMonth() {
   const today = isoDate();
-  const s = summarize(state.expenses, state.month, today);
-  const latest = state.expenses.reduce((max, e) => (e.date > max ? e.date : max), today);
+  const expenses = visibleExpenses();
+  const s = summarize(expenses, state.month, today);
+  const latest = expenses.reduce((max, e) => (e.date > max ? e.date : max), today);
   els.monthLabel.textContent = monthLabel(state.month);
   els.next.disabled = state.month >= monthKey(latest);
   els.total.textContent = formatMoney(s.total);
@@ -242,6 +251,7 @@ function renderDonut(s) {
 }
 
 function renderEntries(rows) {
+  els.entriesHint.hidden = !rows.length;
   if (!rows.length) {
     els.entries.innerHTML = '<li class="empty">No entries this month.</li>';
     return;
@@ -257,14 +267,46 @@ function renderEntries(rows) {
       html += `<li class="day"><span class="wd" style="background:${DAY_COLORS[w]}">${WEEKDAYS[w]}</span>
         <span>${formatDay(day)}</span><span class="day-total">${formatMoney(dayTotals.get(day))}</span></li>`;
     }
-    html += `<li class="entry"><span class="dot" style="background:${colorOf(e.category)}"></span>
+    html += `<li><button type="button" class="entry" data-id="${escapeHtml(e.id)}"><span class="dot" style="background:${colorOf(e.category)}"></span>
       <span class="what"><span class="cat">${escapeHtml(shortName(e.category || 'Uncategorized'))}</span>
       ${e.note ? `<span class="note">${escapeHtml(e.note)}</span>` : ''}</span>
       ${e.status === 'pending' ? '<span class="pending" title="Saved on this phone, waiting to sync">Not synced</span>' : ''}
-      <span class="amt">${formatMoney(e.amount)}</span></li>`;
+      <span class="amt">${formatMoney(e.amount)}</span></button></li>`;
   }
   els.entries.innerHTML = html;
 }
+
+/* ---------- Entry card: see one expense, delete it ---------- */
+
+els.entries.addEventListener('click', (ev) => {
+  const id = ev.target.closest('[data-id]')?.dataset.id;
+  const entry = id && state.expenses.find((e) => e.id === id);
+  if (entry) openEntryDialog(entry);
+});
+
+function openEntryDialog(e) {
+  state.viewing = e;
+  const w = weekdayIndex(e.date);
+  els.entryAmount.textContent = formatMoney(e.amount);
+  els.entryCategory.innerHTML = `<span class="dot" style="background:${colorOf(e.category)}"></span> ${escapeHtml(e.category || 'Uncategorized')}`;
+  els.entryDate.innerHTML = `<span class="wd" style="background:${DAY_COLORS[w]}">${WEEKDAYS[w]}</span> ${formatDay(e.date)}`;
+  els.entryNote.textContent = e.note || '';
+  els.entryNote.hidden = els.entryNoteLabel.hidden = !e.note;
+  els.entryStatus.textContent = e.status === 'pending' ? 'Saved on this phone, waiting to sync' : 'In your sheet';
+  els.entryDialog.showModal();
+}
+
+els.entryDelete.addEventListener('click', async () => {
+  const e = state.viewing;
+  const label = e && `${formatMoney(e.amount)} · ${shortName(e.category || 'Uncategorized')}`;
+  if (!e || !confirm(`Delete this expense?\n\n${label} on ${formatDay(e.date)}`)) return;
+  await db.markDeleted(e.id); // hidden now; removed from the sheet on the next sync
+  els.entryDialog.close();
+  await reloadData();
+  toast(`Deleted ${label}`);
+  syncNow();
+});
+els.entryDialog.addEventListener('close', () => (state.viewing = null));
 
 els.prev.addEventListener('click', () => {
   state.month = shiftMonth(state.month, -1);
@@ -289,10 +331,48 @@ function statusText() {
   }
 }
 
-function renderBadge() {
-  const [text, tone] = statusText();
+/*
+ * The top-right badge only speaks when there is something to know: changes waiting, offline with
+ * changes, a failed sync, not connected, or a sync you asked for. Once everything is synced it says
+ * "Synced" for a moment (if it was showing) and hides. Settings → Status always has the details.
+ */
+let badgeTimer = null;
+
+function setBadge(text, tone) {
   els.badge.textContent = text;
   els.badge.dataset.tone = tone;
+  els.badge.hidden = false;
+}
+
+function renderBadge() {
+  const [text, tone] = statusText();
+  const n = pendingCount();
+  const s = state.sync.state;
+  const quiet =
+    tone === 'ok' || s === 'idle' || (s === 'offline' && !n) || (s === 'syncing' && !n && !state.syncRequested);
+  if (!quiet) {
+    clearTimeout(badgeTimer);
+    badgeTimer = null;
+    return setBadge(text, tone);
+  }
+  const wasShowing = !els.badge.hidden && els.badge.dataset.tone !== 'ok';
+  if (tone === 'ok' && wasShowing) {
+    setBadge('Synced', 'ok');
+    clearTimeout(badgeTimer);
+    badgeTimer = setTimeout(() => {
+      els.badge.hidden = true;
+      badgeTimer = null;
+    }, 1500);
+  } else if (!badgeTimer) {
+    els.badge.hidden = true;
+  }
+}
+
+/** A sync you asked for (badge, menu, Settings): show it working even if nothing is waiting. */
+function manualSync() {
+  state.syncRequested = true;
+  renderBadge();
+  syncNow();
 }
 
 function renderSyncInfo() {
@@ -315,8 +395,8 @@ async function fillSettings() {
   renderSyncInfo();
 }
 
-els.badge.addEventListener('click', () => (state.sync.state === 'off' ? showView('settings') : syncNow()));
-els.syncNowBtn.addEventListener('click', () => syncNow());
+els.badge.addEventListener('click', () => (state.sync.state === 'off' ? showView('settings') : manualSync()));
+els.syncNowBtn.addEventListener('click', manualSync);
 
 els.settingsForm.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -332,7 +412,7 @@ els.settingsForm.addEventListener('submit', async (ev) => {
 });
 
 els.exportBtn.addEventListener('click', () => {
-  const blob = new Blob(['﻿' + toCsv(state.expenses)], { type: 'text/csv;charset=utf-8' });
+  const blob = new Blob(['﻿' + toCsv(visibleExpenses())], { type: 'text/csv;charset=utf-8' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = `bunshe-${isoDate()}.csv`;
@@ -345,7 +425,7 @@ els.exportBtn.addEventListener('click', () => {
 /* ---------- Menu: add, rename and delete shortcuts / categories ---------- */
 
 // Tapping the dimmed backdrop or any [data-close] button closes a dialog.
-for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog, els.listDialog]) {
+for (const dialog of [els.menu, els.shortcutDialog, els.categoryDialog, els.listDialog, els.entryDialog]) {
   dialog.addEventListener('click', (ev) => {
     if (ev.target === dialog || ev.target.closest('[data-close]')) dialog.close();
   });
@@ -369,7 +449,7 @@ els.menu.addEventListener('click', (ev) => {
   else if (action === 'add-category') openCategoryDialog();
   else if (action === 'edit-shortcuts') openList('shortcut');
   else if (action === 'edit-categories') openList('category');
-  else if (action === 'sync') syncNow();
+  else if (action === 'sync') manualSync();
   else if (action === 'settings') showView('settings');
 });
 
@@ -547,8 +627,9 @@ async function reloadData() {
 
 onStatus(async (status) => {
   state.sync = status;
-  if (status.state === 'syncing') renderBadge();
-  else await reloadData();
+  if (status.state === 'syncing') return renderBadge();
+  state.syncRequested = false;
+  await reloadData();
 });
 
 // No zoom. Safari on iPhone can ignore user-scalable=no, so also cancel its pinch gestures.

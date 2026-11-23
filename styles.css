@@ -259,12 +259,24 @@ main { max-width: 560px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-ar
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   margin-bottom: 6px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--card);
+  text-align: left;
 }
+.entry:active { background: var(--accent-soft); }
+#entriesHint { margin: 4px 0 0; font-size: 13px; }
+
+/* Entry card */
+.entry-amount { margin: 8px 0 12px; font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.entry-facts { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 0; font-size: 15px; }
+.entry-facts dt { color: var(--muted); font-size: 13px; font-weight: 600; line-height: 22px; }
+.entry-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.entry-facts .dot { vertical-align: 1px; }
+.entry-facts [hidden] { display: none; }
 .entry .what { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .entry .note { overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .entry .amt { font-weight: 600; font-variant-numeric: tabular-nums; }

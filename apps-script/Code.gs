@@ -2,8 +2,8 @@
  * Accountant At Home: the Home-tab script plus a sync API for the Bunshe app.
  *
  * Paste this over the old Code.gs. Everything the Home tab did still works, and:
- *   - doPost() lets the app send new entries, add / rename / delete categories and shortcuts,
- *     and read the sheet back
+ *   - doPost() lets the app add and delete entries, add / rename / delete categories and
+ *     shortcuts, and read the sheet back
  *   - fixes spec issues #1 (monthly trigger made "[object Object]"),
  *     #3 (clearing the Shortcut cell threw an error) and #6 (two time zones)
  * Setup steps: README.md in the app's repository.
@@ -133,13 +133,17 @@ function doPost(e) {
     const key = PropertiesService.getScriptProperties().getProperty('SYNC_KEY');
     if (!key || req.key !== key) return reply_({ ok: false, error: 'Wrong sync key. Run createSyncKey again and copy the key from the log.' });
     if (req.action === 'pull') return reply_(Object.assign({ ok: true }, pull_()));
-    if (req.action === 'add' || req.action === 'lists') {
+    if (req.action === 'add' || req.action === 'lists' || req.action === 'delete') {
       const lock = LockService.getScriptLock();
       lock.waitLock(20000);
       try {
         if (req.action === 'lists') {
           (req.ops || []).forEach(applyListOp_);
           return reply_({ ok: true });
+        }
+        if (req.action === 'delete') {
+          const deleted = (req.entries || []).filter(deleteExpense_).length;
+          return reply_({ ok: true, deleted: deleted });
         }
         const added = req.entries.filter(addFromApp_).length;
         return reply_({ ok: true, added: added });
@@ -163,6 +167,45 @@ function addFromApp_(entry) {
   if (!(amount >= 0)) throw new Error('Bad amount: ' + entry.amount);
   const date = Utilities.parseDate(entry.date, tz_(), 'yyyy-MM-dd');
   return appendExpense_(date, amount, String(entry.category || ''), String(entry.note || ''), String(entry.id));
+}
+
+/**
+ * Deletes one entry the app deleted. Only its own cells go (Date, Amount, Category, Note and the
+ * id in H); the cells below move up, so totals, the chart and other formulas are left alone.
+ * Entries the app sent are found by their id. Rows typed in the sheet are found by their old row
+ * number, but only if that row still holds the same date, amount, category and note (otherwise
+ * the first row that does) — so a moved or edited row is never deleted by mistake.
+ * Returns false if there was nothing to delete (already gone, or changed in the sheet).
+ */
+function deleteExpense_(e) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(e.date)) throw new Error('Bad date: ' + e.date);
+  const tz = tz_();
+  const sheet = SpreadsheetApp.getActive().getSheetByName(
+    Utilities.formatDate(Utilities.parseDate(e.date, tz, 'yyyy-MM-dd'), tz, 'MMM yyyy'));
+  if (!sheet) return false;
+  const last = lastEntryRow_(sheet);
+  if (last < 2) return false;
+  const rows = sheet.getRange(2, 1, last - 1, ID_COL).getValues();
+  const id = String(e.id || '');
+  const same = (r) =>
+    r[0] instanceof Date &&
+    Utilities.formatDate(r[0], tz, 'yyyy-MM-dd') === e.date &&
+    Math.abs((Number(r[1]) || 0) - Number(e.amount)) < 0.005 &&
+    String(r[2]) === String(e.category || '') &&
+    String(r[3]) === String(e.note || '');
+  let i;
+  const typedRow = /!(\d+)$/.exec(id); // "Nov 2026!5" = row 5, typed in the sheet
+  if (!typedRow) {
+    i = rows.findIndex((r) => String(r[ID_COL - 1]) === id);
+  } else {
+    const guess = Number(typedRow[1]) - 2;
+    i = rows[guess] && !rows[guess][ID_COL - 1] && same(rows[guess]) ? guess : rows.findIndex((r) => !r[ID_COL - 1] && same(r));
+  }
+  if (i < 0) return false;
+  const row = i + 2;
+  sheet.getRange(row, 1, 1, 4).deleteCells(SpreadsheetApp.Dimension.ROWS);
+  sheet.getRange(row, ID_COL).deleteCells(SpreadsheetApp.Dimension.ROWS);
+  return true;
 }
 
 /* ---------- Categories and Shortcut tabs (changes made in the app) ---------- */

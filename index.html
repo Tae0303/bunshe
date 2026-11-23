@@ -24,7 +24,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
     <h1 id="title">Add expense</h1>
-    <button id="syncBadge" class="sync" type="button" data-tone="muted">…</button>
+    <button id="syncBadge" class="sync" type="button" data-tone="muted" hidden></button>
   </header>
 
   <main>
@@ -95,6 +95,7 @@
         <svg id="donut" viewBox="0 0 120 120" role="img" aria-label="Spending by category"></svg>
         <table id="catTable" class="cat-table"></table>
       </div>
+      <p id="entriesHint" class="hint" hidden>Tap an expense to see it or delete it.</p>
       <ul id="entries" class="entries"></ul>
     </section>
 
@@ -221,6 +222,25 @@
       <p class="hint">Tap one to rename or delete it.</p>
       <ul id="listItems" class="manage-list"></ul>
       <button type="button" id="listAdd" class="secondary">Add shortcut</button>
+    </div>
+  </dialog>
+
+  <dialog id="entryDialog" class="modal" aria-labelledby="entryDialogTitle">
+    <div class="modal-body">
+      <div class="list-head">
+        <h2 id="entryDialogTitle" class="section">Expense</h2>
+        <button type="button" class="icon-only" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p id="entryAmount" class="entry-amount"></p>
+      <dl class="entry-facts">
+        <dt>Category</dt><dd id="entryCategory"></dd>
+        <dt>Date</dt><dd id="entryDate"></dd>
+        <dt id="entryNoteLabel">Note</dt><dd id="entryNote"></dd>
+        <dt>Sync</dt><dd id="entryStatus"></dd>
+      </dl>
+      <button type="button" id="entryDelete" class="danger">Delete expense</button>
     </div>
   </dialog>
 

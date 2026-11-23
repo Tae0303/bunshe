@@ -1,5 +1,5 @@
 // Sync with the Google Sheet through its Apps Script web app (apps-script/Code.gs).
-// Order: send category/shortcut changes, then entries waiting on this phone, then pull the whole sheet back.
+// Order: send category/shortcut changes, then deleted entries, then new entries, then pull the whole sheet back.
 
 import * as db from './db.js';
 
@@ -37,14 +37,21 @@ async function run() {
       const left = ((await db.get('pendingLists')) || []).filter((op) => !sent.has(op.id)); // keep any added meanwhile
       await db.set('pendingLists', left);
     }
-    // 2. Expenses waiting on the phone.
+    // 2. Expenses deleted on the phone.
+    const deleted = (await db.allExpenses()).filter((e) => e.status === 'deleted');
+    if (deleted.length) {
+      const entries = deleted.map(({ id, date, amount, category, note }) => ({ id, date, amount, category, note }));
+      await call(settings, { action: 'delete', entries });
+      await db.removeExpenses(deleted.map((e) => e.id));
+    }
+    // 3. Expenses waiting on the phone.
     const pending = (await db.allExpenses()).filter((e) => e.status === 'pending');
     if (pending.length) {
       const entries = pending.map(({ id, date, amount, category, note }) => ({ id, date, amount, category, note }));
       await call(settings, { action: 'add', entries });
       await db.markSynced(pending.map((e) => e.id));
     }
-    // 3. Read the whole sheet back.
+    // 4. Read the whole sheet back.
     const data = await call(settings, { action: 'pull' });
     await db.replaceSynced(data.expenses);
     await db.set('categories', data.categories);
