@@ -32,7 +32,7 @@ Your existing triggers keep working. The monthly trigger now creates the new mon
 
 ### 2. Install the app on your iPhone
 
-1. Open the app's GitHub Pages address in **Safari**.
+1. Open **https://tae0303.github.io/bunshe/** in **Safari**.
 2. Tap **Share → Add to Home Screen**.
 3. Open Bunshe from the home screen → **Settings**, paste the Web app URL and the sync key, then tap **Save and sync**. Your past months appear after the first sync.
 
