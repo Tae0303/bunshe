@@ -1,12 +1,12 @@
 import * as db from './db.js';
 import { syncNow, onStatus } from './sync.js';
 import {
-  DEFAULT_CATEGORIES, WEEKDAYS, DAY_COLORS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
+  DEFAULT_CATEGORIES, WEEKDAYS, WEEKDAY_NAMES, DAY_COLORS, DAY_DOTS, isoDate, monthKey, monthLabel, shiftMonth, summarize,
   parseAmount, round2, formatMoney, formatDay, shortName, weekdayIndex, toCsv,
   applyListOps, hasName, sameName, stepAmount, moveTo, nameKey,
 } from './logic.js';
 
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.7.2';
 const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
@@ -20,7 +20,7 @@ const els = {
   form: $('#entry'), amount: $('#amount'), steps: document.querySelectorAll('[data-step]'), clear: $('#clearAmount'),
   stepsGroup: $('#steps'), minusMode: $('#minusMode'),
   shortcut: $('#shortcut'), categories: $('#categories'),
-  date: $('#date'), datePill: $('#datePill'), today: $('#today'), note: $('#note'), error: $('#formError'),
+  date: $('#date'), dateDot: $('#dateDot'), today: $('#today'), note: $('#note'), error: $('#formError'),
   monthLabel: $('#monthLabel'), prev: $('#prevMonth'), next: $('#nextMonth'),
   total: $('#mTotal'), count: $('#mCount'), avg: $('#mAvg'), days: $('#mDays'),
   donut: $('#donut'), catTable: $('#catTable'), entries: $('#entries'),
@@ -38,7 +38,7 @@ const els = {
   entryCategory: $('#entryCategory'), entryDate: $('#entryDate'), entryNote: $('#entryNote'),
   entryNoteLabel: $('#entryNoteLabel'), entryStatus: $('#entryStatus'), entryDelete: $('#entryDelete'),
   entryEdit: $('#entryEdit'), editDialog: $('#editDialog'), editForm: $('#editForm'),
-  edAmount: $('#edAmount'), edCategory: $('#edCategory'), edDate: $('#edDate'), edDatePill: $('#edDatePill'),
+  edAmount: $('#edAmount'), edCategory: $('#edCategory'), edDate: $('#edDate'), edDateDot: $('#edDateDot'),
   edNote: $('#edNote'), edError: $('#edError'),
   connectedCard: $('#connectedCard'), changeConnection: $('#changeConnection'), cancelConnection: $('#cancelConnection'),
 };
@@ -162,17 +162,17 @@ function setAmount(n) {
 function setToday() {
   state.autoDate = isoDate();
   els.date.value = state.autoDate;
-  paintDayPill(els.datePill, els.date.value);
+  paintDayDot(els.dateDot, els.date.value);
 }
 
-/** The day label in front of a date field: "Mon" in its Thai day colour, as in the sheet. */
-function paintDayPill(pill, iso) {
+/** The dot inside a date field, in the Thai colour of that day (Sun red … Sat purple). */
+function paintDayDot(dot, iso) {
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(iso);
-  pill.hidden = !valid;
+  dot.hidden = !valid;
   if (!valid) return;
   const w = weekdayIndex(iso);
-  pill.textContent = WEEKDAYS[w];
-  pill.style.background = DAY_COLORS[w];
+  dot.style.background = DAY_DOTS[w];
+  dot.title = WEEKDAY_NAMES[w];
 }
 
 function selectCategory(name) {
@@ -240,8 +240,8 @@ els.steps.forEach((button) =>
 els.minusMode.addEventListener('click', () => setMinus(!state.minus));
 els.clear.addEventListener('click', () => setAmount(0));
 els.today.addEventListener('click', setToday);
-els.date.addEventListener('input', () => paintDayPill(els.datePill, els.date.value));
-els.date.addEventListener('change', () => paintDayPill(els.datePill, els.date.value));
+els.date.addEventListener('input', () => paintDayDot(els.dateDot, els.date.value));
+els.date.addEventListener('change', () => paintDayDot(els.dateDot, els.date.value));
 // Any change to the form clears an old "Enter an amount" / "Pick a category" message.
 els.form.addEventListener('click', (ev) => {
   if (ev.target.closest('button:not([type="submit"])')) showError('');
@@ -394,7 +394,7 @@ els.entryEdit.addEventListener('click', () => {
     choices.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   els.edCategory.value = e.category || '';
   els.edDate.value = e.date;
-  paintDayPill(els.edDatePill, e.date);
+  paintDayDot(els.edDateDot, e.date);
   els.edNote.value = e.note || '';
   dialogError(els.edError, '');
   els.editDialog.showModal();
@@ -425,7 +425,7 @@ els.editForm.addEventListener('submit', async (ev) => {
   syncNow();
 });
 els.editForm.addEventListener('input', () => dialogError(els.edError, ''));
-for (const type of ['input', 'change']) els.edDate.addEventListener(type, () => paintDayPill(els.edDatePill, els.edDate.value));
+for (const type of ['input', 'change']) els.edDate.addEventListener(type, () => paintDayDot(els.edDateDot, els.edDate.value));
 els.editDialog.addEventListener('close', () => (state.editingEntry = null));
 
 els.entryDelete.addEventListener('click', async () => {
