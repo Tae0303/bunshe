@@ -16,7 +16,7 @@ export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Thai day colours, the same ones the sheet uses to colour its date cells.
 // Pastel, a little richer than the sheet's so they still show as a small dot. Sunday (pastel red)
 // and Thursday (pastel orange) are kept clearly apart, and Sunday apart from Tuesday's pink.
-export const DAY_COLORS = ['#fca5a5', '#fde68a', '#fbcfe8', '#bbf7d0', '#fdba74', '#bfdbfe', '#ddd6fe'];
+export const DAY_COLORS = ['#fca5a5', '#fde15a', '#fbcfe8', '#bbf7d0', '#fdba74', '#bfdbfe', '#ddd6fe'];
 export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
