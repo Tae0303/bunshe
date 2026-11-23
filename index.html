@@ -65,10 +65,11 @@
           <div class="field">
             <label for="date" class="label">Date</label>
             <div class="date-row">
-              <span class="date-field">
+              <!-- The box is a label: tapping the dot or the padding opens the date picker too -->
+              <label class="date-field">
                 <span class="day-dot" id="dateDot" aria-hidden="true" hidden></span>
                 <input type="date" id="date">
-              </span>
+              </label>
               <button type="button" id="today" class="ghost-btn">Today</button>
             </div>
           </div>
@@ -273,10 +274,10 @@
       <div class="field">
         <label class="label" for="edDate">Date</label>
         <div class="date-row">
-          <span class="date-field">
+          <label class="date-field">
             <span class="day-dot" id="edDateDot" aria-hidden="true" hidden></span>
             <input id="edDate" type="date">
-          </span>
+          </label>
         </div>
       </div>
       <div class="field">

@@ -6,7 +6,7 @@ import {
   applyListOps, hasName, sameName, stepAmount, moveTo, nameKey,
 } from './logic.js';
 
-const APP_VERSION = '1.7.4';
+const APP_VERSION = '1.7.5';
 const GRIP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14M5 12h14M5 16h14"/></svg>';
 // Category colours, kept clear of the teal accent so a selected chip still shows its dot.
 // "Others" is always slate; the rest take colours in list order, so a new category never shifts them.
