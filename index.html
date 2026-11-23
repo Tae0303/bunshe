@@ -65,6 +65,7 @@
           <div class="field">
             <label for="date" class="label">Date</label>
             <div class="date-row">
+              <span class="day-pill" id="datePill" hidden></span>
               <input type="date" id="date">
               <button type="button" id="today" class="ghost-btn">Today</button>
             </div>
@@ -269,7 +270,10 @@
       </div>
       <div class="field">
         <label class="label" for="edDate">Date</label>
-        <input id="edDate" type="date">
+        <div class="date-row">
+          <span class="day-pill" id="edDatePill" hidden></span>
+          <input id="edDate" type="date">
+        </div>
       </div>
       <div class="field">
         <label class="label" for="edNote">Note</label>
